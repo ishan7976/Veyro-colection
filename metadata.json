@@ -1,0 +1,6 @@
+{
+  "name": "VEYRO Streetwear",
+  "description": "Modern luxury streetwear fashion brand - Wear Your Identity.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

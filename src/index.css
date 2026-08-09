@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', 'Helvetica Neue', system-ui, -apple-system, sans-serif;
+  --font-logo: 'Space Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  font-family: 'Inter', 'Helvetica Neue', system-ui, sans-serif;
+  font-weight: 400;
+}
+
+@layer utilities {
+  .font-logo {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+  }
+  .font-hero {
+    font-family: 'Helvetica Neue', 'Inter', sans-serif;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: -0.02em;
+  }
+  .font-heading {
+    font-family: 'Inter', 'Helvetica Neue', sans-serif;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: -0.01em;
+  }
+  .font-button {
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+  }
+  .vertical-rl {
+    writing-mode: vertical-rl;
+  }
+}
+
+.bg-dot-pattern {
+  background-image: radial-gradient(currentColor 0.5px, transparent 0.5px);
+  background-size: 24px 24px;
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  animation: marquee 25s linear infinite;
+}
+
+.animate-pulse-slow {
+  animation: pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
