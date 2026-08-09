@@ -60,26 +60,26 @@ export const Navbar: React.FC = () => {
     <header
       className={`sticky top-0 z-40 w-full transition-all duration-300 ${
         isScrolled
-          ? 'bg-white/95 dark:bg-[#050505]/95 backdrop-blur-md border-b border-neutral-200 dark:border-white/10 shadow-lg py-3'
-          : 'bg-white dark:bg-[#050505] border-b border-neutral-200 dark:border-white/10 py-4'
+          ? 'bg-white/95 dark:bg-[#050505]/95 backdrop-blur-md border-b border-neutral-200 dark:border-white/10 shadow-lg py-2.5 sm:py-3'
+          : 'bg-white dark:bg-[#050505] border-b border-neutral-200 dark:border-white/10 py-3 sm:py-4'
       }`}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-8 flex items-center justify-between h-14 sm:h-16">
+      <div className="max-w-7xl mx-auto px-3 sm:px-8 flex items-center justify-between h-12 sm:h-16">
         {/* Left: Mobile Menu Toggle & Brand Logo */}
-        <div className="flex items-center gap-6 sm:gap-8">
+        <div className="flex items-center gap-2.5 sm:gap-8">
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="lg:hidden p-2 text-neutral-700 dark:text-white/70 hover:text-neutral-900 dark:hover:text-white transition"
-            aria-label="Toggle Menu"
+            className="lg:hidden p-1.5 text-neutral-700 dark:text-white/80 hover:text-neutral-900 dark:hover:text-white transition rounded-lg hover:bg-neutral-100 dark:hover:bg-white/10"
+            aria-label="Toggle Navigation Menu"
           >
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
 
           <div
             onClick={() => navigateTo('home')}
-            className="cursor-pointer group flex items-center gap-2"
+            className="cursor-pointer group flex items-center gap-1.5 sm:gap-2"
           >
-            <span className="font-logo text-2xl sm:text-3xl font-bold tracking-[0.18em] text-neutral-900 dark:text-white group-hover:opacity-80 transition-opacity">
+            <span className="font-logo text-xl sm:text-3xl font-bold tracking-[0.15em] sm:tracking-[0.18em] text-neutral-900 dark:text-white group-hover:opacity-80 transition-opacity">
               VEYRO
             </span>
             <span className="hidden sm:inline-block text-[9px] font-mono font-bold tracking-[0.25em] text-neutral-500 dark:text-white/40 border-l border-neutral-300 dark:border-white/20 pl-2 uppercase">
@@ -166,27 +166,27 @@ export const Navbar: React.FC = () => {
         </div>
 
         {/* Right Action Controls */}
-        <div className="flex items-center gap-3 sm:gap-5">
-          {/* Search Bar Pill */}
+        <div className="flex items-center gap-2 sm:gap-5">
+          {/* Search Button (Compact icon on mobile, Pill on tablet/desktop) */}
           <button
             onClick={() => setIsSearchOpen(true)}
-            className="flex items-center border border-neutral-300 dark:border-white/20 hover:border-neutral-900 dark:hover:border-white/60 bg-neutral-100/90 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full px-4 py-2 sm:px-5 sm:py-2 gap-2.5 transition-all duration-200 cursor-pointer text-neutral-800 dark:text-white/90 hover:text-neutral-900 dark:hover:text-white shadow-xs group"
+            className="flex items-center border border-neutral-300 dark:border-white/20 hover:border-neutral-900 dark:hover:border-white/60 bg-neutral-100/90 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full p-2 sm:px-5 sm:py-2 gap-2 transition-all duration-200 cursor-pointer text-neutral-800 dark:text-white/90 hover:text-neutral-900 dark:hover:text-white shadow-xs group"
             aria-label="Open Quick Search"
           >
-            <Search className="w-4 h-4 text-neutral-600 dark:text-white/70 group-hover:scale-110 transition-transform" />
-            <span className="text-xs uppercase tracking-widest font-mono font-bold">Search</span>
+            <Search className="w-4 h-4 text-neutral-700 dark:text-white/80 group-hover:scale-110 transition-transform" />
+            <span className="hidden sm:inline text-xs uppercase tracking-widest font-mono font-bold">Search</span>
           </button>
 
-          {/* Theme Toggle */}
+          {/* Theme Toggle (Visible on desktop/tablet, also inside mobile menu) */}
           <button
             onClick={toggleTheme}
-            className="p-1.5 text-neutral-700 dark:text-white/70 hover:text-neutral-900 dark:hover:text-white transition rounded-full hover:bg-neutral-100 dark:hover:bg-white/10"
+            className="hidden sm:block p-1.5 text-neutral-700 dark:text-white/70 hover:text-neutral-900 dark:hover:text-white transition rounded-full hover:bg-neutral-100 dark:hover:bg-white/10"
             title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
             {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-300" /> : <Moon className="w-4 h-4 text-neutral-800" />}
           </button>
 
-          {/* Wishlist */}
+          {/* Wishlist Icon */}
           <button
             onClick={() => navigateTo('account')}
             className="relative p-1.5 text-neutral-700 dark:text-white/70 hover:text-neutral-900 dark:hover:text-white transition hidden sm:block"
@@ -200,8 +200,8 @@ export const Navbar: React.FC = () => {
             )}
           </button>
 
-          {/* Account */}
-          <div className="relative">
+          {/* Account Icon / Dropdown */}
+          <div className="relative hidden sm:block">
             {user ? (
               <button
                 onClick={() => setIsAccountDropdownOpen(!isAccountDropdownOpen)}
@@ -263,12 +263,13 @@ export const Navbar: React.FC = () => {
             )}
           </div>
 
-          {/* Cart Pill */}
+          {/* Cart Button */}
           <div
             onClick={toggleCart}
-            className="relative flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition pl-2"
+            className="relative flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition pl-1 py-1"
           >
-            <span className="text-xs font-medium text-neutral-900 dark:text-white uppercase tracking-widest">Cart</span>
+            <ShoppingBag className="w-4.5 h-4.5 text-neutral-800 dark:text-white sm:hidden" />
+            <span className="hidden sm:inline text-xs font-medium text-neutral-900 dark:text-white uppercase tracking-widest">Cart</span>
             <span className="bg-neutral-900 text-white dark:bg-white dark:text-black text-[9px] w-4 h-4 flex items-center justify-center rounded-full font-black">
               {itemCount}
             </span>
@@ -278,14 +279,67 @@ export const Navbar: React.FC = () => {
 
       {/* Mobile Drawer Navigation */}
       {isMobileMenuOpen && (
-        <div className="lg:hidden border-t border-neutral-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] p-6 space-y-4 animate-fade-in">
-          <div className="space-y-3 text-xs uppercase tracking-widest">
+        <div className="lg:hidden border-t border-neutral-200 dark:border-white/10 bg-white/98 dark:bg-[#0A0A0A]/98 backdrop-blur-xl p-5 space-y-4 animate-fade-in shadow-2xl">
+          <div className="space-y-2.5 text-xs uppercase tracking-widest">
+            {/* Account & Wishlist Summary Bar */}
+            <div className="p-3 bg-neutral-100 dark:bg-neutral-900 rounded-xl flex items-center justify-between">
+              {user ? (
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-7 h-7 rounded-full bg-neutral-900 text-white dark:bg-white dark:text-black text-[11px] font-mono font-bold flex items-center justify-center flex-shrink-0">
+                    {(user.name || 'U').charAt(0).toUpperCase()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-bold text-neutral-900 dark:text-white text-xs truncate">{user.name}</p>
+                    <p className="text-[9px] text-neutral-500 dark:text-white/50 truncate font-mono">{user.email}</p>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    openAuthModal('login');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="font-bold text-neutral-900 dark:text-white text-xs flex items-center gap-2"
+                >
+                  <User className="w-4 h-4" />
+                  <span>SIGN IN / ACCOUNT</span>
+                </button>
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    navigateTo('account');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="p-1.5 relative text-neutral-700 dark:text-white/80 hover:text-neutral-900 dark:hover:text-white"
+                  title="Wishlist & Account"
+                >
+                  <Heart className="w-4 h-4" />
+                  {wishlist.length > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 text-white text-[8px] font-mono font-bold rounded-full flex items-center justify-center">
+                      {wishlist.length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={toggleTheme}
+                  className="p-1.5 text-neutral-700 dark:text-white/80 hover:text-neutral-900 dark:hover:text-white"
+                  title="Toggle Theme"
+                >
+                  {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-300" /> : <Moon className="w-4 h-4 text-neutral-800" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Navigation Links */}
             <button
               onClick={() => {
                 navigateTo('home');
                 setIsMobileMenuOpen(false);
               }}
-              className="w-full text-left py-2 font-bold text-neutral-900 dark:text-white border-b border-neutral-200 dark:border-white/10"
+              className="w-full text-left py-2 font-bold text-neutral-900 dark:text-white border-b border-neutral-100 dark:border-white/10"
             >
               NEW DROPS
             </button>
@@ -294,39 +348,68 @@ export const Navbar: React.FC = () => {
                 navigateTo('shop');
                 setIsMobileMenuOpen(false);
               }}
-              className="w-full text-left py-2 font-bold text-neutral-900 dark:text-white border-b border-neutral-200 dark:border-white/10"
+              className="w-full text-left py-2 font-bold text-neutral-900 dark:text-white border-b border-neutral-100 dark:border-white/10"
             >
               ALL COLLECTIONS
             </button>
-            <div className="pl-4 space-y-2 border-l border-neutral-300 dark:border-white/20">
+
+            <div className="pl-3 space-y-1.5 border-l-2 border-neutral-200 dark:border-white/20 my-1">
               {navCategories.map((c) => (
                 <button
                   key={c.cat}
                   onClick={() => handleCategoryClick(c.cat)}
-                  className="block text-[10px] font-mono text-neutral-600 dark:text-white/60 hover:text-neutral-900 dark:hover:text-white py-1"
+                  className="block text-[11px] font-mono text-neutral-600 dark:text-white/70 hover:text-neutral-900 dark:hover:text-white py-1 w-full text-left"
                 >
                   {c.name}
                 </button>
               ))}
             </div>
+
             <button
               onClick={() => {
                 navigateTo('about');
                 setIsMobileMenuOpen(false);
               }}
-              className="w-full text-left py-2 font-bold text-neutral-900 dark:text-white border-b border-neutral-200 dark:border-white/10"
+              className="w-full text-left py-2 font-bold text-neutral-900 dark:text-white border-b border-neutral-100 dark:border-white/10"
             >
               ARCHIVE
             </button>
+
             <button
               onClick={() => {
                 navigateTo('contact');
                 setIsMobileMenuOpen(false);
               }}
-              className="w-full text-left py-2 font-bold text-neutral-900 dark:text-white"
+              className="w-full text-left py-2 font-bold text-neutral-900 dark:text-white border-b border-neutral-100 dark:border-white/10"
             >
-              ABOUT
+              ABOUT VEYRO
             </button>
+
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => {
+                  navigateTo('admin');
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full text-left py-2 font-bold text-amber-500 flex items-center gap-2"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>ADMIN DASHBOARD</span>
+              </button>
+            )}
+
+            {user && (
+              <button
+                onClick={() => {
+                  logout();
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full text-left py-2 font-bold text-red-500 flex items-center gap-2 pt-2 border-t border-neutral-100 dark:border-white/10"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>SIGN OUT</span>
+              </button>
+            )}
           </div>
         </div>
       )}

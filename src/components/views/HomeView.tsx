@@ -71,9 +71,9 @@ export const HomeView: React.FC = () => {
     <div className="space-y-16 pb-16 bg-neutral-50 dark:bg-[#050505] text-neutral-900 dark:text-white transition-colors duration-200">
       {/* 1. Sophisticated Dark Hero Section (Split Layout) */}
       <section className="border-b border-neutral-800 dark:border-white/10 bg-neutral-950 dark:bg-[#0A0A0A] text-white">
-        <div className="flex flex-col lg:flex-row min-h-[80vh] lg:min-h-[85vh]">
+        <div className="flex flex-col lg:flex-row min-h-[70vh] sm:min-h-[80vh] lg:min-h-[85vh]">
           {/* Left Hero Main Block */}
-          <div className="w-full lg:w-3/5 relative border-b lg:border-b-0 lg:border-r border-neutral-800 dark:border-white/10 flex flex-col justify-end p-8 sm:p-12 lg:p-16 overflow-hidden">
+          <div className="w-full lg:w-3/5 relative border-b lg:border-b-0 lg:border-r border-neutral-800 dark:border-white/10 flex flex-col justify-end p-5 xs:p-6 sm:p-12 lg:p-16 overflow-hidden">
             {/* Background dot pattern & gradient */}
             <div className="absolute inset-0 bg-neutral-950 dark:bg-[#0A0A0A]">
               <div className="absolute inset-0 opacity-20 dark:opacity-25 bg-dot-pattern" />
@@ -85,18 +85,18 @@ export const HomeView: React.FC = () => {
               <img
                 src="https://images.unsplash.com/photo-1509967419530-da38b4704bc6?q=80&w=1600&auto=format&fit=crop"
                 alt="VEYRO Background"
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover object-center"
                 referrerPolicy="no-referrer"
               />
             </div>
 
             {/* Hero Main Content */}
-            <div className="relative z-20 space-y-6 pt-16">
-              <span className="text-xs uppercase tracking-[0.4em] text-white/50 block font-mono">
+            <div className="relative z-20 space-y-4 sm:space-y-6 pt-10 sm:pt-16">
+              <span className="text-[10px] sm:text-xs uppercase tracking-[0.3em] sm:tracking-[0.4em] text-white/50 block font-mono">
                 SS/25 COLLECTION • DROP 004
               </span>
 
-              <h1 className="font-hero text-5xl sm:text-7xl lg:text-[96px] leading-[0.88] font-black tracking-tight uppercase text-white">
+              <h1 className="font-hero text-3xl xs:text-4xl sm:text-7xl lg:text-[96px] leading-[0.9] sm:leading-[0.88] font-black tracking-tight uppercase text-white">
                 Wear Your<br />Identity
               </h1>
 
@@ -104,10 +104,10 @@ export const HomeView: React.FC = () => {
                 Engineered streetwear for the unapologetic generation. Ultra-dense 320-480 GSM organic cotton, drop-shoulder silhouettes, and raw minimalist luxury.
               </p>
 
-              <div className="flex flex-wrap gap-4 pt-2">
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-2 w-full sm:w-auto">
                 <button
                   onClick={() => navigateTo('shop')}
-                  className="font-button bg-white text-black px-8 py-4 text-xs font-medium uppercase tracking-[0.15em] hover:bg-zinc-200 transition-all cursor-pointer shadow-xl flex items-center gap-2"
+                  className="font-button bg-white text-black px-6 sm:px-8 py-3.5 sm:py-4 text-xs font-medium uppercase tracking-[0.15em] hover:bg-zinc-200 transition-all cursor-pointer shadow-xl flex items-center justify-center gap-2 w-full sm:w-auto"
                 >
                   <span>Shop Collection</span>
                   <ArrowRight className="w-4 h-4" />
@@ -115,7 +115,7 @@ export const HomeView: React.FC = () => {
 
                 <button
                   onClick={() => navigateTo('shop', { category: 'Limited Edition Drops' })}
-                  className="font-button border border-white/30 text-white px-8 py-4 text-xs font-medium uppercase tracking-[0.15em] hover:bg-white/10 transition-all cursor-pointer"
+                  className="font-button border border-white/30 text-white px-6 sm:px-8 py-3.5 sm:py-4 text-xs font-medium uppercase tracking-[0.15em] hover:bg-white/10 transition-all cursor-pointer flex items-center justify-center w-full sm:w-auto"
                 >
                   Lookbook / Vault
                 </button>
@@ -130,7 +130,7 @@ export const HomeView: React.FC = () => {
 
           {/* Right Hero Featured Pieces Sidebar */}
           <aside className="w-full lg:w-2/5 flex flex-col justify-between bg-neutral-900 dark:bg-[#050505]">
-            <div className="p-6 sm:p-8 border-b border-neutral-800 dark:border-white/10 flex justify-between items-center">
+            <div className="p-4 sm:p-8 border-b border-neutral-800 dark:border-white/10 flex justify-between items-center">
               <h2 className="text-[11px] uppercase tracking-[0.3em] font-bold text-white">Featured Pieces</h2>
               <span className="text-[10px] text-white/40 font-mono">02 Items</span>
             </div>
@@ -142,7 +142,7 @@ export const HomeView: React.FC = () => {
                   if (featuredProducts[0]) setQuickViewProduct(featuredProducts[0]);
                   else navigateTo('shop');
                 }}
-                className="flex-1 p-6 sm:p-8 border-b border-neutral-800 dark:border-white/10 relative group cursor-pointer overflow-hidden min-h-[220px] flex flex-col justify-between"
+                className="flex-1 p-5 sm:p-8 border-b border-neutral-800 dark:border-white/10 relative group cursor-pointer overflow-hidden min-h-[180px] sm:min-h-[220px] flex flex-col justify-between"
               >
                 <div className="absolute inset-0 overflow-hidden bg-neutral-900">
                   <img
@@ -162,8 +162,8 @@ export const HomeView: React.FC = () => {
                       {formatPrice(featuredProducts[0]?.price || 9999)}
                     </span>
                   </div>
-                  <div className="mt-8">
-                    <h3 className="text-xl font-bold uppercase tracking-tight text-white group-hover:text-amber-400 transition-colors drop-shadow-sm">
+                  <div className="mt-6 sm:mt-8">
+                    <h3 className="text-lg sm:text-xl font-bold uppercase tracking-tight text-white group-hover:text-amber-400 transition-colors drop-shadow-sm">
                       {featuredProducts[0]?.name || 'Veyro Heavy Hoodie'}
                     </h3>
                     <p className="text-[10px] text-white/70 uppercase tracking-widest mt-1 font-mono">
@@ -179,7 +179,7 @@ export const HomeView: React.FC = () => {
                   if (featuredProducts[1]) setQuickViewProduct(featuredProducts[1]);
                   else navigateTo('shop');
                 }}
-                className="flex-1 p-6 sm:p-8 border-b border-neutral-800 dark:border-white/10 relative group cursor-pointer overflow-hidden min-h-[220px] flex flex-col justify-between"
+                className="flex-1 p-5 sm:p-8 border-b border-neutral-800 dark:border-white/10 relative group cursor-pointer overflow-hidden min-h-[180px] sm:min-h-[220px] flex flex-col justify-between"
               >
                 <div className="absolute inset-0 overflow-hidden bg-neutral-900">
                   <img
@@ -199,8 +199,8 @@ export const HomeView: React.FC = () => {
                       {formatPrice(featuredProducts[1]?.price || 4999)}
                     </span>
                   </div>
-                  <div className="mt-8">
-                    <h3 className="text-xl font-bold uppercase tracking-tight text-white group-hover:text-amber-400 transition-colors drop-shadow-sm">
+                  <div className="mt-6 sm:mt-8">
+                    <h3 className="text-lg sm:text-xl font-bold uppercase tracking-tight text-white group-hover:text-amber-400 transition-colors drop-shadow-sm">
                       {featuredProducts[1]?.name || 'Identity Graphic Tee'}
                     </h3>
                     <p className="text-[10px] text-white/70 uppercase tracking-widest mt-1 font-mono">
@@ -212,7 +212,7 @@ export const HomeView: React.FC = () => {
             </div>
 
             {/* Bottom Newsletter Bar */}
-            <div className="p-6 sm:p-8 bg-neutral-900 text-white dark:bg-white dark:text-black flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shrink-0">
+            <div className="p-5 sm:p-8 bg-neutral-900 text-white dark:bg-white dark:text-black flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shrink-0">
               <div className="flex flex-col">
                 <span className="text-[10px] font-black uppercase tracking-widest">Newsletter</span>
                 <span className="text-[9px] opacity-70 font-mono">Get secret passwords & 15% off drops</span>

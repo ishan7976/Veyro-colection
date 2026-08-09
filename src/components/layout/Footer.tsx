@@ -102,7 +102,7 @@ export const Footer: React.FC = () => {
                   <CheckCircle2 className="w-4 h-4 text-white" />
                 </div>
               ) : (
-                <form onSubmit={handleSubscribe} className="flex gap-2 max-w-md">
+                <form onSubmit={handleSubscribe} className="flex flex-col xs:flex-row gap-2 max-w-md">
                   <div className="relative flex-1">
                     <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
                     <input
@@ -117,7 +117,7 @@ export const Footer: React.FC = () => {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="px-5 py-2.5 bg-white text-black font-extrabold text-xs uppercase tracking-widest hover:bg-zinc-200 transition flex items-center gap-1 cursor-pointer"
+                    className="px-5 py-2.5 bg-white text-black font-extrabold text-xs uppercase tracking-widest hover:bg-zinc-200 transition flex items-center justify-center gap-1 cursor-pointer"
                   >
                     <span>JOIN</span>
                     <ArrowRight className="w-3.5 h-3.5" />

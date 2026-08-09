@@ -8,9 +8,16 @@
   --font-mono: 'JetBrains Mono', monospace;
 }
 
-body {
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  box-sizing: border-box;
   font-family: 'Inter', 'Helvetica Neue', system-ui, sans-serif;
   font-weight: 400;
+}
+
+*, ::before, ::after {
+  box-sizing: border-box;
 }
 
 @layer utilities {
