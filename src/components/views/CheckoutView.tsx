@@ -6,10 +6,11 @@ import { ShippingAddress } from '../../types';
 import { useToast } from '../../context/ToastContext';
 import { formatPrice } from '../../lib/currency';
 import { CreditCard, Truck, ShieldCheck, Lock, CheckCircle2, ArrowRight, Smartphone } from 'lucide-react';
+import { GoogleIcon } from '../common/AuthModal';
 
 export const CheckoutView: React.FC = () => {
   const { cart, subtotal, discountTotal, promoCode, clearCart, total, shippingFee, tax } = useCart();
-  const { user } = useAuth();
+  const { user, loginWithGoogle, openAuthModal } = useAuth();
   const { navigateTo } = useNavigation();
   const { addToast } = useToast();
 
@@ -91,6 +92,40 @@ export const CheckoutView: React.FC = () => {
       setIsSubmitting(false);
     }
   };
+
+  if (!user) {
+    return (
+      <div className="max-w-xl mx-auto py-16 px-4 text-center">
+        <div className="p-8 bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-6">
+          <div className="w-14 h-14 bg-amber-500/10 border border-amber-500/30 text-amber-500 rounded-2xl flex items-center justify-center mx-auto">
+            <Lock className="w-7 h-7" />
+          </div>
+          <div className="space-y-2">
+            <span className="font-mono text-[10px] font-black tracking-widest text-amber-500 uppercase">EXPRESS CHECKOUT GATE</span>
+            <h2 className="text-2xl font-black text-neutral-900 dark:text-white uppercase tracking-tight">Authentication Required</h2>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">Please sign in to your VEYRO account to save address details, track shipments, and complete checkout.</p>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <button
+              onClick={loginWithGoogle}
+              className="w-full py-3.5 px-4 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white border border-neutral-300 dark:border-neutral-700 rounded-xl font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-3 shadow-sm hover:bg-neutral-900 hover:text-white hover:border-neutral-900 dark:hover:bg-white dark:hover:text-black transition-all duration-200 cursor-pointer group active:scale-[0.99]"
+            >
+              <GoogleIcon className="w-4 h-4 transition-transform group-hover:scale-110" />
+              <span>Continue with Google</span>
+            </button>
+
+            <button
+              onClick={() => openAuthModal('login')}
+              className="w-full py-3 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-mono font-bold text-xs uppercase rounded-xl tracking-wider hover:opacity-90 transition cursor-pointer"
+            >
+              Sign In with Email
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">

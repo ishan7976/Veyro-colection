@@ -1,35 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigation } from '../../context/NavigationContext';
-import { INITIAL_PRODUCTS } from '../../data/products';
 import { Product } from '../../types';
 import { formatPrice } from '../../lib/currency';
-import { Search, X, Flame, ArrowRight } from 'lucide-react';
+import { Search, X, Flame, ArrowRight, Loader2 } from 'lucide-react';
 
 export const QuickSearchModal: React.FC = () => {
   const { isSearchOpen, setIsSearchOpen, navigateTo, openProductDetail } = useNavigation();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<Product[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
     if (!searchQuery.trim()) {
       setResults([]);
+      setIsSearching(false);
       return;
     }
 
-    const q = searchQuery.toLowerCase().trim();
-    const matches = INITIAL_PRODUCTS.filter((p) => {
-      const nameMatch = p.name.toLowerCase().includes(q);
-      const catMatch = p.category.toLowerCase().includes(q);
-      const descMatch = p.description.toLowerCase().includes(q);
-      const fitMatch = p.fit.toLowerCase().includes(q);
-      const tagMatch = p.tags?.some((t) => t.toLowerCase().includes(q));
-      const gsmMatch = p.gsm?.toString().includes(q);
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const res = await fetch(`/api/products?search=${encodeURIComponent(searchQuery)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setResults((data.products || []).slice(0, 6));
+        }
+      } catch (err) {
+        console.error('Failed to search Supabase products:', err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 250);
 
-      return nameMatch || catMatch || descMatch || fitMatch || tagMatch || gsmMatch;
-    });
-
-    setResults(matches.slice(0, 6));
+    return () => clearTimeout(timer);
   }, [searchQuery]);
 
   useEffect(() => {
@@ -55,7 +59,11 @@ export const QuickSearchModal: React.FC = () => {
       >
         {/* Search Input Bar */}
         <div className="p-4 sm:p-5 border-b border-neutral-200 dark:border-white/10 flex items-center gap-3">
-          <Search className="w-5 h-5 text-neutral-400 dark:text-white/50 shrink-0" />
+          {isSearching ? (
+            <Loader2 className="w-5 h-5 text-amber-500 animate-spin shrink-0" />
+          ) : (
+            <Search className="w-5 h-5 text-neutral-400 dark:text-white/50 shrink-0" />
+          )}
           <input
             type="text"
             autoFocus

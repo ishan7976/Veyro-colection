@@ -264,16 +264,16 @@ export const Navbar: React.FC = () => {
           </div>
 
           {/* Cart Button */}
-          <div
+          <button
             onClick={toggleCart}
-            className="relative flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition pl-1 py-1"
+            className="relative flex items-center justify-center p-1.5 text-neutral-900 dark:text-white hover:opacity-80 transition cursor-pointer"
+            aria-label="Shopping Cart"
           >
-            <ShoppingBag className="w-4.5 h-4.5 text-neutral-800 dark:text-white sm:hidden" />
-            <span className="hidden sm:inline text-xs font-medium text-neutral-900 dark:text-white uppercase tracking-widest">Cart</span>
-            <span className="bg-neutral-900 text-white dark:bg-white dark:text-black text-[9px] w-4 h-4 flex items-center justify-center rounded-full font-black">
+            <ShoppingBag className="w-5 h-5 text-neutral-900 dark:text-white" />
+            <span className="absolute -top-1 -right-1 bg-neutral-900 text-white dark:bg-white dark:text-black text-[9px] w-4 h-4 flex items-center justify-center rounded-full font-black border border-white dark:border-black">
               {itemCount}
             </span>
-          </div>
+          </button>
         </div>
       </div>
 

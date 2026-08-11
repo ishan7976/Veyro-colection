@@ -13,23 +13,30 @@ export const HomeView: React.FC = () => {
   const [newArrivals, setNewArrivals] = useState<Product[]>([]);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchHomeData = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/products');
+      if (!res.ok) {
+        throw new Error('Failed to load products from Supabase database');
+      }
+      const data = await res.json();
+      const all: Product[] = data.products || [];
+
+      setFeaturedProducts(all.slice(0, 4));
+      setNewArrivals(all.filter((p) => p.isNewArrival || p.isLimitedDrop).slice(0, 4));
+    } catch (err: any) {
+      console.error('Failed to load home products from Supabase:', err);
+      setError(err?.message || 'Error fetching products');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchHomeData = async () => {
-      try {
-        const res = await fetch('/api/products');
-        const data = await res.json();
-        const all: Product[] = data.products || [];
-
-        setFeaturedProducts(all.slice(0, 4));
-        setNewArrivals(all.filter((p) => p.isNewArrival || p.isLimitedDrop).slice(0, 4));
-      } catch (err) {
-        console.error('Failed to load home products:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchHomeData();
   }, []);
 
@@ -302,13 +309,13 @@ export const HomeView: React.FC = () => {
         </div>
 
         {isLoading ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-6">
             {[1, 2, 3, 4].map((n) => (
               <div key={n} className="aspect-[3/4] bg-neutral-200 dark:bg-zinc-900 animate-pulse rounded-none border border-neutral-300 dark:border-white/10" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-6">
             {featuredProducts.map((product) => (
               <ProductCard
                 key={product.id}
@@ -355,7 +362,7 @@ export const HomeView: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-6">
           {newArrivals.map((product) => (
             <ProductCard
               key={product.id}

@@ -11,14 +11,82 @@ interface AuthContextType {
   authMode: 'login' | 'register';
   openAuthModal: (mode?: 'login' | 'register') => void;
   closeAuthModal: () => void;
-  login: (email: string, pwd: string) => Promise<{ success: boolean; role?: string }>;
-  register: (email: string, pwd: string, name: string) => Promise<boolean>;
+  login: (email: string, pwd: string) => Promise<{ success: boolean; role?: string; error?: string }>;
+  loginWithGoogle: () => Promise<{ success: boolean; error?: any }>;
+  register: (email: string, pwd: string, name: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateProfile: (data: Partial<User>) => Promise<boolean>;
   refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const formatSupabaseAuthError = (error: any): string => {
+  if (!error) return 'Authentication failed.';
+  const msg = (error.message || error.msg || error.error_description || '').toLowerCase();
+  const code = (error.code || error.status || '').toString().toLowerCase();
+
+  // Rate limiting errors
+  if (
+    code.includes('over_email_send_rate_limit') ||
+    code.includes('rate_limit') ||
+    code.includes('429') ||
+    msg.includes('email rate limit exceeded') ||
+    msg.includes('rate limit') ||
+    msg.includes('rate_limit') ||
+    msg.includes('too many requests') ||
+    msg.includes('exceeded')
+  ) {
+    return 'Too many signup attempts. Please try again later.';
+  }
+
+  // Duplicate user / account exists errors
+  if (
+    code.includes('user_already_exists') ||
+    code.includes('email_exists') ||
+    msg.includes('user already registered') ||
+    msg.includes('already registered') ||
+    msg.includes('already in use') ||
+    msg.includes('already exists') ||
+    msg.includes('user already exists')
+  ) {
+    return 'An account with this email address already exists. Please sign in instead.';
+  }
+
+  // Email verification required
+  if (
+    code.includes('email_not_confirmed') ||
+    code.includes('email_not_verified') ||
+    msg.includes('email not confirmed') ||
+    msg.includes('email not verified') ||
+    msg.includes('confirm your email')
+  ) {
+    return 'Email not verified. Please check your inbox and verify your email address before signing in.';
+  }
+
+  // User not found
+  if (
+    code.includes('user_not_found') ||
+    msg.includes('user not found') ||
+    msg.includes('no user found') ||
+    msg.includes('user does not exist')
+  ) {
+    return 'User not found. Please check your email address or create a new account.';
+  }
+
+  // Invalid credentials
+  if (
+    code.includes('invalid_credentials') ||
+    code.includes('invalid_grant') ||
+    msg.includes('invalid login credentials') ||
+    msg.includes('invalid credentials') ||
+    msg.includes('invalid email or password')
+  ) {
+    return 'Invalid credentials. Please check your email and password.';
+  }
+
+  return error.message || 'Authentication error. Please try again.';
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -29,63 +97,73 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const { addToast } = useToast();
 
+  const handleSessionUser = async (sessionUser: any, accessToken: string, isMounted: boolean) => {
+    const userEmail = sessionUser.email || '';
+    const userId = sessionUser.id;
+    const metadata = sessionUser.user_metadata || {};
+    const fullName = metadata.full_name || metadata.name || userEmail.split('@')[0];
+    const avatarUrl = metadata.avatar_url || metadata.picture || null;
+
+    const { profile, role } = await fetchProfileFromSupabase(userEmail, userId, { fullName, avatarUrl });
+
+    const resolvedName = profile?.full_name || profile?.name || fullName || userEmail.split('@')[0];
+    const resolvedAvatar = profile?.avatar_url || avatarUrl || undefined;
+
+    if (isMounted) {
+      setUser({
+        id: userId,
+        email: userEmail,
+        name: resolvedName,
+        avatarUrl: resolvedAvatar,
+        role: role === 'admin' ? 'admin' : 'user',
+        createdAt: profile?.created_at || new Date().toISOString()
+      });
+      setToken(accessToken);
+      localStorage.setItem('veyro_token', accessToken);
+
+      const targetRedirect = localStorage.getItem('veyro_oauth_redirect');
+      if (targetRedirect === 'account') {
+        localStorage.removeItem('veyro_oauth_redirect');
+        window.dispatchEvent(new CustomEvent('veyro_navigate', { detail: { page: 'account' } }));
+      }
+    }
+  };
+
   // Primary authentication & Supabase auth session verification
   useEffect(() => {
     let isMounted = true;
 
+    // Check URL for OAuth error query/hash parameters
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const error = urlParams.get('error') || hashParams.get('error');
+      const errorDesc = urlParams.get('error_description') || hashParams.get('error_description');
+
+      if (error || errorDesc) {
+        const isCanceled = error === 'access_denied' || (errorDesc && errorDesc.toLowerCase().includes('cancel'));
+        addToast({
+          title: isCanceled ? 'Sign In Canceled' : 'OAuth Error',
+          message: errorDesc || error || 'Google sign-in was not completed.',
+          type: isCanceled ? 'info' : 'error'
+        });
+        window.history.replaceState({}, document.title, window.location.pathname);
+        localStorage.removeItem('veyro_oauth_redirect');
+      }
+    }
+
     const initAuthSession = async () => {
       try {
-        // 1. Check Supabase Active Auth Session
+        // Check Supabase Active Auth Session
         const { data: { session } } = await supabase.auth.getSession();
         
         if (session?.user) {
-          const userEmail = session.user.email || '';
-          const userId = session.user.id;
-          
-          // Fetch current user's profile from Supabase profiles table
-          const { profile, role } = await fetchProfileFromSupabase(userEmail, userId);
-          
+          await handleSessionUser(session.user, session.access_token, isMounted);
+        } else {
           if (isMounted) {
-            setUser({
-              id: userId,
-              email: userEmail,
-              name: profile?.name || session.user.user_metadata?.name || userEmail.split('@')[0],
-              role: role === 'admin' ? 'admin' : 'user',
-              createdAt: profile?.created_at || new Date().toISOString()
-            });
-            setToken(session.access_token);
-            localStorage.setItem('veyro_token', session.access_token);
-          }
-          setIsLoading(false);
-          return;
-        }
-
-        // 2. Fallback to API token if exists
-        const storedToken = localStorage.getItem('veyro_token');
-        if (storedToken) {
-          const res = await fetch('/api/auth/me', {
-            headers: { Authorization: `Bearer ${storedToken}` }
-          });
-          if (res.ok) {
-            const apiUser = await res.json();
-            
-            // Check Supabase profiles table for role confirmation
-            const { profile, role } = await fetchProfileFromSupabase(apiUser.email, apiUser.id);
-            
-            if (isMounted) {
-              setUser({
-                ...apiUser,
-                role: role === 'admin' ? 'admin' : (apiUser.role || 'user')
-              });
-              setToken(storedToken);
-            }
-          } else {
-            // Stale token cleanup
+            setToken(null);
+            setUser(null);
             localStorage.removeItem('veyro_token');
-            if (isMounted) {
-              setToken(null);
-              setUser(null);
-            }
           }
         }
       } catch (err) {
@@ -100,19 +178,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Subscribe to Supabase auth state changes
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
-        const userEmail = session.user.email || '';
-        const { profile, role } = await fetchProfileFromSupabase(userEmail, session.user.id);
-        if (isMounted) {
-          setUser({
-            id: session.user.id,
-            email: userEmail,
-            name: profile?.name || session.user.user_metadata?.name || userEmail.split('@')[0],
-            role: role === 'admin' ? 'admin' : 'user',
-            createdAt: profile?.created_at || new Date().toISOString()
-          });
-          setToken(session.access_token);
-          localStorage.setItem('veyro_token', session.access_token);
-        }
+        await handleSessionUser(session.user, session.access_token, isMounted);
       } else if (event === 'SIGNED_OUT') {
         if (isMounted) {
           setUser(null);
@@ -142,53 +208,98 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { profile, role } = await fetchProfileFromSupabase(user.email, user.id);
     setUser(prev => prev ? {
       ...prev,
+      name: profile?.full_name || profile?.name || prev.name,
+      avatarUrl: profile?.avatar_url || prev.avatarUrl,
       role: role === 'admin' ? 'admin' : 'user'
     } : null);
   };
 
-  const login = async (email: string, pwd: string): Promise<{ success: boolean; role?: string }> => {
+  const loginWithGoogle = async (): Promise<{ success: boolean; error?: any }> => {
     try {
-      // First try Supabase auth sign-in
+      setIsLoading(true);
+      localStorage.setItem('veyro_oauth_redirect', 'account');
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          }
+        }
+      });
+
+      if (error) {
+        console.error('[Google OAuth Error]', error);
+        addToast({
+          title: 'Google Login Failed',
+          message: error.message || 'Unable to connect to Google OAuth',
+          type: 'error'
+        });
+        localStorage.removeItem('veyro_oauth_redirect');
+        setIsLoading(false);
+        return { success: false, error };
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('[Google OAuth Exception]', err);
+      addToast({
+        title: 'Connection Error',
+        message: err.message || 'Unexpected error during Google login',
+        type: 'error'
+      });
+      localStorage.removeItem('veyro_oauth_redirect');
+      setIsLoading(false);
+      return { success: false, error: err };
+    }
+  };
+
+  const login = async (email: string, pwd: string): Promise<{ success: boolean; role?: string; error?: string }> => {
+    try {
+      // Login exclusively via Supabase Auth
       const { data: supaAuthData, error: supaAuthError } = await supabase.auth.signInWithPassword({
         email,
         password: pwd
       });
 
-      let authenticatedUserEmail = email;
-      let authenticatedUserId = supaAuthData?.user?.id;
-
-      if (!supaAuthError && supaAuthData.session) {
-        setToken(supaAuthData.session.access_token);
-        localStorage.setItem('veyro_token', supaAuthData.session.access_token);
+      if (supaAuthError) {
+        const userMessage = formatSupabaseAuthError(supaAuthError);
+        addToast({ title: 'Sign In Failed', message: userMessage, type: 'error' });
+        return { success: false, error: userMessage };
       }
 
-      // Always authenticate against backend API
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: pwd })
-      });
-      const data = await res.json();
-
-      if (!res.ok && supaAuthError) {
-        addToast({ title: 'Authentication Error', message: data.error || supaAuthError.message || 'Login failed', type: 'error' });
-        return { success: false };
+      if (!supaAuthData?.session || !supaAuthData?.user) {
+        const failMsg = 'Unable to establish authenticated session.';
+        addToast({ title: 'Sign In Failed', message: failMsg, type: 'error' });
+        return { success: false, error: failMsg };
       }
 
-      const activeToken = data.token || supaAuthData?.session?.access_token || 'simulated_admin_token';
-      const activeUser = data.user || { id: authenticatedUserId || 'usr_admin', email, name: email.split('@')[0], role: email === 'admin@veyro.com' ? 'admin' : 'user' };
+      const sessionUser = supaAuthData.user;
+      const accessToken = supaAuthData.session.access_token;
+      const userEmail = sessionUser.email || email;
+      const userId = sessionUser.id;
+      const metadata = sessionUser.user_metadata || {};
+      const fullName = metadata.full_name || metadata.name || userEmail.split('@')[0];
+      const avatarUrl = metadata.avatar_url || metadata.picture || null;
 
-      setToken(activeToken);
-      localStorage.setItem('veyro_token', activeToken);
+      setToken(accessToken);
+      localStorage.setItem('veyro_token', accessToken);
 
-      // REQUIREMENT 1: Fetch current user's profile from Supabase profiles table & Check role column
-      const { profile, role } = await fetchProfileFromSupabase(activeUser.email, activeUser.id);
+      const { profile, role } = await fetchProfileFromSupabase(userEmail, userId, { fullName, avatarUrl });
 
-      const finalRole = role === 'admin' ? 'admin' : (activeUser.role === 'admin' ? 'admin' : 'user');
+      const resolvedName = profile?.full_name || profile?.name || fullName || userEmail.split('@')[0];
+      const resolvedAvatar = profile?.avatar_url || avatarUrl || undefined;
+      const finalRole = role === 'admin' ? 'admin' : 'user';
 
       const fullUser: User = {
-        ...activeUser,
-        role: finalRole === 'admin' ? 'admin' : 'user'
+        id: userId,
+        email: userEmail,
+        name: resolvedName,
+        avatarUrl: resolvedAvatar,
+        role: finalRole,
+        createdAt: profile?.created_at || new Date().toISOString()
       };
 
       setUser(fullUser);
@@ -198,55 +309,75 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         message: finalRole === 'admin' ? 'Authenticated with Administrator privileges' : 'Logged in to VEYRO Club',
         type: 'success'
       });
-      
+
       closeAuthModal();
       return { success: true, role: finalRole };
-    } catch (err) {
+    } catch (err: any) {
       console.error('[Supabase Auth Debug] Login exception:', err);
-      addToast({ title: 'Server Error', message: 'Unable to process login', type: 'error' });
-      return { success: false };
+      const excMsg = err?.message || 'Unable to process login';
+      addToast({ title: 'Server Error', message: excMsg, type: 'error' });
+      return { success: false, error: excMsg };
     }
   };
 
-  const register = async (email: string, pwd: string, name: string): Promise<boolean> => {
+  const register = async (email: string, pwd: string, name: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Sign up on Supabase Auth
-      const { data: supaSignUp } = await supabase.auth.signUp({
-        email,
+      const cleanEmail = email.trim().toLowerCase();
+
+      // Call Supabase Auth signUp directly (no pre-signup profile queries)
+      const { data: supaSignUp, error: supaError } = await supabase.auth.signUp({
+        email: cleanEmail,
         password: pwd,
-        options: { data: { name } }
+        options: { data: { full_name: name } }
       });
 
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: pwd, name })
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        addToast({ title: 'Registration Failed', message: data.error || 'Could not create account', type: 'error' });
-        return false;
+      if (supaError) {
+        const userMsg = supaError.message || formatSupabaseAuthError(supaError);
+        addToast({ title: 'Registration Failed', message: userMsg, type: 'error' });
+        return { success: false, error: userMsg };
       }
 
-      setToken(data.token);
-      localStorage.setItem('veyro_token', data.token);
+      // Handle Supabase email enumeration protection (existing user returns empty identities array)
+      if (supaSignUp?.user?.identities && supaSignUp.user.identities.length === 0) {
+        const userMsg = 'An account with this email address already exists. Please sign in instead.';
+        addToast({ title: 'Account Exists', message: userMsg, type: 'error' });
+        return { success: false, error: userMsg };
+      }
 
-      // Create profile record in Supabase profiles table
-      const userId = supaSignUp?.user?.id || data.user.id;
-      const { role } = await fetchProfileFromSupabase(email, userId);
+      if (supaSignUp?.user) {
+        const realUserId = supaSignUp.user.id;
 
-      setUser({
-        ...data.user,
-        role: role === 'admin' ? 'admin' : 'user'
-      });
+        // Upsert profile into public.profiles using real Supabase Auth UUID
+        const { profile, role } = await fetchProfileFromSupabase(cleanEmail, realUserId, { fullName: name });
 
-      addToast({ title: 'Account Created', message: 'Welcome to VEYRO Identity', type: 'success' });
-      closeAuthModal();
-      return true;
-    } catch (err) {
-      addToast({ title: 'Server Error', message: 'Unable to complete registration', type: 'error' });
-      return false;
+        if (supaSignUp.session) {
+          setToken(supaSignUp.session.access_token);
+          localStorage.setItem('veyro_token', supaSignUp.session.access_token);
+          setUser({
+            id: realUserId,
+            email: cleanEmail,
+            name: profile?.full_name || profile?.name || name,
+            role: role === 'admin' ? 'admin' : 'user',
+            createdAt: new Date().toISOString()
+          });
+          addToast({ title: 'Account Created', message: 'Welcome to VEYRO Identity', type: 'success' });
+        } else {
+          // Email confirmation is enabled in Supabase project (session is null)
+          addToast({
+            title: 'Account Created',
+            message: 'Account created. Please check your email to verify your account.',
+            type: 'info'
+          });
+        }
+        closeAuthModal();
+        return { success: true };
+      }
+
+      return { success: false, error: 'Registration could not be completed.' };
+    } catch (err: any) {
+      const excMsg = err?.message || 'Unable to complete registration';
+      addToast({ title: 'Server Error', message: excMsg, type: 'error' });
+      return { success: false, error: excMsg };
     }
   };
 
@@ -292,6 +423,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         openAuthModal,
         closeAuthModal,
         login,
+        loginWithGoogle,
         register,
         logout,
         updateProfile,

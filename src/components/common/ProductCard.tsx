@@ -29,7 +29,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView }
 
   return (
     <div
-      className="group relative flex flex-col bg-white dark:bg-[#0A0A0A] border border-neutral-200 dark:border-white/10 hover:border-neutral-900 dark:hover:border-white/40 transition-all duration-300 cursor-pointer overflow-hidden shadow-xs hover:shadow-xl w-full"
+      className="group relative flex flex-col bg-white dark:bg-[#0A0A0A] border border-neutral-200 dark:border-white/10 hover:border-neutral-900 dark:hover:border-white/40 transition-all duration-300 cursor-pointer overflow-hidden shadow-xs hover:shadow-xl w-full h-full justify-between"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => {
         setIsHovered(false);
@@ -38,7 +38,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView }
       onClick={() => openProductDetail(product.id)}
     >
       {/* Image Container */}
-      <div className="relative aspect-[4/5] sm:aspect-[3/4] w-full overflow-hidden bg-neutral-100 dark:bg-zinc-950">
+      <div className="relative aspect-square sm:aspect-[3/4] h-[160px] xs:h-[175px] sm:h-auto w-full overflow-hidden bg-neutral-100 dark:bg-zinc-950 shrink-0">
         <img
           src={isHovered ? secondaryImage : (product.images?.[0] || DEFAULT_IMG)}
           alt={product.name}
@@ -47,19 +47,19 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView }
         />
 
         {/* Badges Top Left */}
-        <div className="absolute top-2.5 left-2.5 sm:top-3 sm:left-3 flex flex-col gap-1 items-start z-10">
+        <div className="absolute top-1.5 left-1.5 sm:top-3 sm:left-3 flex flex-col gap-0.5 sm:gap-1 items-start z-10">
           {product.isLimitedDrop && (
-            <span className="bg-neutral-900 text-white dark:bg-white dark:text-black text-[9px] px-2 py-0.5 font-black uppercase tracking-tighter shadow-md">
+            <span className="bg-neutral-900 text-white dark:bg-white dark:text-black text-[8px] sm:text-[9px] px-1.5 py-0.5 font-black uppercase tracking-tighter shadow-md">
               {product.dropNumber || 'LIMITED'}
             </span>
           )}
           {product.isNewArrival && !product.isLimitedDrop && (
-            <span className="border border-neutral-300 dark:border-white/30 text-neutral-900 dark:text-white bg-white/80 dark:bg-black/60 backdrop-blur-md text-[9px] px-2 py-0.5 font-bold uppercase tracking-tighter shadow-xs">
+            <span className="border border-neutral-300 dark:border-white/30 text-neutral-900 dark:text-white bg-white/80 dark:bg-black/60 backdrop-blur-md text-[8px] sm:text-[9px] px-1.5 py-0.5 font-bold uppercase tracking-tighter shadow-xs">
               NEW
             </span>
           )}
           {product.gsm && (
-            <span className="bg-neutral-900/80 dark:bg-black/80 text-white/90 dark:text-white/70 text-[8px] sm:text-[9px] font-mono border border-neutral-700 dark:border-white/10 px-1.5 py-0.5">
+            <span className="bg-neutral-900/80 dark:bg-black/80 text-white/90 dark:text-white/70 text-[7px] sm:text-[9px] font-mono border border-neutral-700 dark:border-white/10 px-1 py-0.5">
               {product.gsm} GSM
             </span>
           )}
@@ -71,14 +71,14 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView }
             e.stopPropagation();
             toggleWishlist(product.id);
           }}
-          className={`absolute top-2.5 right-2.5 sm:top-3 sm:right-3 p-2 border backdrop-blur-md transition-all duration-200 z-10 rounded-none ${
+          className={`absolute top-1.5 right-1.5 sm:top-3 sm:right-3 p-1.5 sm:p-2 border backdrop-blur-md transition-all duration-200 z-10 rounded-none ${
             inWishlist
               ? 'bg-red-500 text-white border-red-500 shadow-lg'
               : 'bg-white/80 dark:bg-black/60 border-neutral-200 dark:border-white/20 text-neutral-800 dark:text-white/80 hover:text-neutral-900 dark:hover:text-white hover:border-neutral-400 dark:hover:border-white/50'
           }`}
           aria-label="Save to Wishlist"
         >
-          <Heart className={`w-3.5 h-3.5 ${inWishlist ? 'fill-current' : ''}`} />
+          <Heart className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${inWishlist ? 'fill-current' : ''}`} />
         </button>
 
         {/* Desktop Hover Action Overlay */}
@@ -134,39 +134,39 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView }
       </div>
 
       {/* Info Content */}
-      <div className="p-3 sm:p-4 flex flex-col flex-1 justify-between bg-white dark:bg-[#0A0A0A]">
+      <div className="p-2 sm:p-4 flex flex-col flex-1 justify-between bg-white dark:bg-[#0A0A0A]">
         <div>
-          <div className="flex items-center justify-between text-[9px] sm:text-[10px] text-neutral-500 dark:text-white/40 mb-1 font-mono uppercase tracking-widest">
-            <span className="truncate max-w-[120px]">{product.category}</span>
-            <div className="flex items-center gap-1 text-amber-500 font-bold shrink-0">
-              <Star className="w-3 h-3 fill-current" />
+          <div className="flex items-center justify-between text-[8px] sm:text-[10px] text-neutral-500 dark:text-white/40 mb-0.5 sm:mb-1 font-mono uppercase tracking-widest leading-none">
+            <span className="truncate max-w-[75px] xs:max-w-[100px] sm:max-w-[120px]">{product.category}</span>
+            <div className="flex items-center gap-0.5 text-amber-500 font-bold shrink-0">
+              <Star className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-current" />
               <span>{product.rating}</span>
             </div>
           </div>
 
-          <h3 className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white tracking-tight uppercase group-hover:text-neutral-600 dark:group-hover:text-white/80 transition-colors line-clamp-1">
+          <h3 className="font-bold text-[11px] xs:text-xs sm:text-sm text-neutral-900 dark:text-white tracking-tight uppercase group-hover:text-neutral-600 dark:group-hover:text-white/80 transition-colors line-clamp-2 leading-tight">
             {product.name}
           </h3>
         </div>
 
-        <div className="mt-2.5 pt-2.5 border-t border-neutral-100 dark:border-white/10 flex items-center justify-between">
-          <div className="flex items-baseline gap-1.5 sm:gap-2 font-mono">
-            <span className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-white">
+        <div className="mt-1.5 pt-1.5 sm:mt-2.5 sm:pt-2.5 border-t border-neutral-100 dark:border-white/10 flex items-center justify-between">
+          <div className="flex items-baseline gap-1 sm:gap-2 font-mono">
+            <span className="font-bold text-[11px] xs:text-xs sm:text-sm text-neutral-900 dark:text-white">
               {formatPrice(product.price)}
             </span>
             {product.originalPrice && (
-              <span className="text-[10px] sm:text-xs text-neutral-400 dark:text-white/30 line-through">
+              <span className="text-[9px] sm:text-xs text-neutral-400 dark:text-white/30 line-through">
                 {formatPrice(product.originalPrice)}
               </span>
             )}
           </div>
 
           {/* Color Swatches */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 sm:gap-1">
             {product.colors.map((c) => (
               <span
                 key={c.name}
-                className="w-2 sm:w-2.5 h-2 sm:h-2.5 border border-neutral-300 dark:border-white/20 shadow-xs rounded-full"
+                className="w-1.5 sm:w-2.5 h-1.5 sm:h-2.5 border border-neutral-300 dark:border-white/20 shadow-xs rounded-full"
                 style={{ backgroundColor: c.hex }}
                 title={c.name}
               />
@@ -174,23 +174,23 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView }
           </div>
         </div>
 
-        {/* Mobile Quick Actions Bar (Always accessible on touch screens) */}
-        <div className="mt-3 sm:hidden pt-2 border-t border-neutral-100 dark:border-white/10 flex gap-2">
+        {/* Mobile Quick Actions Bar */}
+        <div className="mt-1.5 sm:hidden pt-1 border-t border-neutral-100 dark:border-white/10 flex gap-1">
           {showSizeQuickPicker ? (
             <div
-              className="w-full bg-neutral-50 dark:bg-neutral-900 p-2 border border-neutral-200 dark:border-white/10"
+              className="w-full bg-neutral-50 dark:bg-neutral-900 p-1 border border-neutral-200 dark:border-white/10"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[9px] font-bold uppercase tracking-widest text-neutral-500 dark:text-white/50">Select Size</span>
-                <span className="text-[8px] text-neutral-400 font-mono">{product.fit}</span>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[8px] font-bold uppercase tracking-widest text-neutral-500 dark:text-white/50">Size</span>
+                <span className="text-[7px] text-neutral-400 font-mono">{product.fit}</span>
               </div>
-              <div className="grid grid-cols-6 gap-1">
+              <div className="grid grid-cols-6 gap-0.5">
                 {product.sizes.map((s) => (
                   <button
                     key={s}
                     onClick={(e) => handleQuickAdd(e, s)}
-                    className="py-1 text-[9px] font-mono font-bold border border-neutral-300 dark:border-white/20 active:bg-neutral-900 active:text-white dark:active:bg-white dark:active:text-black"
+                    className="py-0.5 text-[8px] font-mono font-bold border border-neutral-300 dark:border-white/20 active:bg-neutral-900 active:text-white dark:active:bg-white dark:active:text-black transition"
                   >
                     {s}
                   </button>
@@ -204,9 +204,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView }
                   e.stopPropagation();
                   setShowSizeQuickPicker(true);
                 }}
-                className="flex-1 py-2 bg-neutral-900 text-white dark:bg-white dark:text-black font-bold text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 active:bg-neutral-800"
+                className="flex-1 py-1.5 px-1.5 bg-neutral-900 text-white dark:bg-white dark:text-black font-bold text-[8px] xs:text-[9px] uppercase tracking-wider flex items-center justify-center gap-1 active:bg-neutral-800 transition"
               >
-                <ShoppingBag className="w-3 h-3" />
+                <ShoppingBag className="w-2.5 h-2.5 xs:w-3 xs:h-3" />
                 Quick Add
               </button>
               {onQuickView && (
@@ -215,10 +215,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView }
                     e.stopPropagation();
                     onQuickView(product);
                   }}
-                  className="p-2 border border-neutral-300 dark:border-white/20 text-neutral-800 dark:text-white/80"
+                  className="p-1.5 border border-neutral-300 dark:border-white/20 text-neutral-800 dark:text-white/80 active:bg-neutral-100 dark:active:bg-neutral-800 transition"
                   title="Quick View"
                 >
-                  <Eye className="w-3.5 h-3.5" />
+                  <Eye className="w-3 h-3" />
                 </button>
               )}
             </>

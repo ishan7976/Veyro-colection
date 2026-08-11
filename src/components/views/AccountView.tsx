@@ -5,9 +5,10 @@ import { useNavigation } from '../../context/NavigationContext';
 import { Order } from '../../types';
 import { formatPrice } from '../../lib/currency';
 import { User, Package, Heart, MapPin, LogOut, Shield, ChevronRight, ShoppingBag, Calendar, Database, Sparkles, Trash2, RefreshCw } from 'lucide-react';
+import { GoogleIcon } from '../common/AuthModal';
 
 export const AccountView: React.FC = () => {
-  const { user, token, logout } = useAuth();
+  const { user, token, logout, loginWithGoogle, openAuthModal } = useAuth();
   const { wishlist, wishlistProducts, isLoadingWishlist, wishlistError, removeFromWishlist, addToCart, refetchWishlist } = useCart();
   const { navigateTo } = useNavigation();
 
@@ -48,16 +49,39 @@ export const AccountView: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="max-w-md mx-auto py-20 px-4 text-center space-y-4">
-        <User className="w-12 h-12 text-neutral-400 mx-auto" />
-        <h2 className="text-xl font-black text-neutral-900 dark:text-white uppercase">Authentication Required</h2>
-        <p className="text-xs text-neutral-500">Sign in to access your VEYRO Identity account, order history and saved wishlist.</p>
-        <button
-          onClick={() => navigateTo('home')}
-          className="px-6 py-3 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-bold text-xs uppercase rounded-xl"
-        >
-          Return to Store
-        </button>
+      <div className="max-w-md mx-auto py-16 px-4 text-center space-y-6">
+        <div className="w-16 h-16 rounded-3xl bg-neutral-900 dark:bg-white text-white dark:text-black flex items-center justify-center mx-auto shadow-2xl">
+          <User className="w-8 h-8" />
+        </div>
+        <div className="space-y-1.5">
+          <span className="font-mono text-[10px] font-black tracking-widest text-amber-500 uppercase">AUTHENTICATION REQUIRED</span>
+          <h2 className="text-2xl font-black text-neutral-900 dark:text-white uppercase tracking-tight">VEYRO Identity Account</h2>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">Sign in to access your personal profile, order history, and saved vault wishlist.</p>
+        </div>
+
+        <div className="p-6 bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-200 dark:border-neutral-800 shadow-xl space-y-4">
+          <button
+            onClick={loginWithGoogle}
+            className="w-full py-3.5 px-4 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white border border-neutral-300 dark:border-neutral-700 rounded-xl font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-3 shadow-sm hover:bg-neutral-900 hover:text-white hover:border-neutral-900 dark:hover:bg-white dark:hover:text-black transition-all duration-200 cursor-pointer group active:scale-[0.99]"
+          >
+            <GoogleIcon className="w-4 h-4 transition-transform group-hover:scale-110" />
+            <span>Continue with Google</span>
+          </button>
+
+          <div className="relative flex items-center justify-center my-2">
+            <div className="border-t border-neutral-200 dark:border-neutral-800 w-full" />
+            <span className="bg-white dark:bg-neutral-900 px-3 font-mono text-[9px] font-bold text-neutral-400 uppercase tracking-widest absolute">
+              OR EMAIL LOGIN
+            </span>
+          </div>
+
+          <button
+            onClick={() => openAuthModal('login')}
+            className="w-full py-3 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-mono font-bold text-xs uppercase rounded-xl tracking-wider hover:opacity-90 transition cursor-pointer"
+          >
+            Sign In with Email
+          </button>
+        </div>
       </div>
     );
   }
@@ -67,15 +91,30 @@ export const AccountView: React.FC = () => {
       {/* Profile Header Banner */}
       <div className="p-6 sm:p-8 bg-neutral-950 text-white rounded-3xl border border-neutral-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 shadow-2xl">
         <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500 text-black font-black text-2xl flex items-center justify-center uppercase shadow-lg">
-            {user.name.charAt(0)}
-          </div>
+          {user.avatarUrl ? (
+            <img
+              src={user.avatarUrl}
+              alt={user.name}
+              className="w-16 h-16 rounded-2xl object-cover shadow-lg border border-neutral-700"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="w-16 h-16 rounded-2xl bg-amber-500 text-black font-black text-2xl flex items-center justify-center uppercase shadow-lg">
+              {user.name ? user.name.charAt(0) : 'V'}
+            </div>
+          )}
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-black uppercase tracking-tight">{user.name}</h1>
-              <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-400 font-mono font-bold text-[10px] rounded-full border border-amber-500/40">
-                VEYRO CLUB VIP
-              </span>
+              {user.role === 'admin' ? (
+                <span className="px-2.5 py-0.5 bg-red-500/20 text-red-400 font-mono font-bold text-[10px] rounded-full border border-red-500/40">
+                  ADMINISTRATOR
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-400 font-mono font-bold text-[10px] rounded-full border border-amber-500/40">
+                  VEYRO CLUB VIP
+                </span>
+              )}
             </div>
             <p className="text-xs text-neutral-400 font-mono">{user.email}</p>
           </div>

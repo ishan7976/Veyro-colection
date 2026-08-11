@@ -3,11 +3,11 @@ import { CartItem, Product, ProductSize } from '../types';
 import { useToast } from './ToastContext';
 import { useAuth } from './AuthContext';
 import { formatPrice } from '../lib/currency';
-import { INITIAL_PRODUCTS } from '../data/products';
 import {
   fetchWishlistFromSupabase,
   addWishlistItemToSupabase,
-  removeWishlistItemFromSupabase
+  removeWishlistItemFromSupabase,
+  fetchProductsFromSupabase
 } from '../lib/supabase';
 
 interface CartContextType {
@@ -100,34 +100,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setWishlistError(null);
 
     try {
-      let rawData: any = [];
-      try {
-        const res = await fetch('/api/products');
-        if (res.ok) {
-          rawData = await res.json();
-        }
-      } catch (err) {
-        console.warn('Failed to fetch products from /api/products:', err);
-      }
+      const { success, data: allProducts } = await fetchProductsFromSupabase();
 
-      let allProducts: Product[] = [];
-      if (Array.isArray(rawData)) {
-        allProducts = rawData;
-      } else if (rawData && Array.isArray(rawData.products)) {
-        allProducts = rawData.products;
-      } else {
-        console.error("Products data is not an array", rawData);
-      }
-
-      if (!Array.isArray(allProducts)) {
-        console.error("Products data is not an array", allProducts);
+      if (!success || !Array.isArray(allProducts)) {
+        console.error("Products data could not be retrieved from Supabase", allProducts);
         setWishlistProducts([]);
         setIsLoadingWishlist(false);
         return;
       }
 
       const productMap = new Map<string, Product>();
-      INITIAL_PRODUCTS.forEach(p => productMap.set(p.id, p));
       allProducts.forEach(p => productMap.set(p.id, p));
 
       const matchedProducts: Product[] = [];
@@ -150,7 +132,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setWishlistProducts(matchedProducts);
     } catch (err: any) {
-      console.error('Error hydrating wishlist products:', err);
+      console.error('Error hydrating wishlist products from Supabase:', err);
       setWishlistError('Unable to load saved vault items');
     } finally {
       setIsLoadingWishlist(false);
@@ -281,18 +263,13 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       let productToAdd = wishlistProducts.find(p => p.id === productId);
       if (!productToAdd) {
-        const foundLocal = INITIAL_PRODUCTS.find(p => p.id === productId);
-        if (foundLocal) {
-          productToAdd = foundLocal;
-        } else {
-          try {
-            const res = await fetch(`/api/products/${productId}`);
-            if (res.ok) {
-              productToAdd = await res.json();
-            }
-          } catch {
-            // ignore
+        try {
+          const res = await fetch(`/api/products/${productId}`);
+          if (res.ok) {
+            productToAdd = await res.json();
           }
+        } catch {
+          // ignore
         }
       }
 

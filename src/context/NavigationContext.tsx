@@ -158,7 +158,7 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     []
   );
 
-  // Handle browser back/forward buttons
+  // Handle browser back/forward buttons & custom navigation events
   useEffect(() => {
     const handlePopState = () => {
       const route = parseInitialRoute();
@@ -166,9 +166,19 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setAdminSubRouteState(route.adminSubRoute);
     };
 
+    const handleCustomNavigate = (e: any) => {
+      if (e.detail?.page) {
+        navigateTo(e.detail.page);
+      }
+    };
+
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+    window.addEventListener('veyro_navigate', handleCustomNavigate);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('veyro_navigate', handleCustomNavigate);
+    };
+  }, [navigateTo]);
 
   const resetFilters = useCallback(() => {
     setFilters(DEFAULT_FILTERS);

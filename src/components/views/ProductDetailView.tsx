@@ -31,6 +31,7 @@ export const ProductDetailView: React.FC = () => {
   const [reviews, setReviews] = useState<ProductReview[]>([]);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [selectedImage, setSelectedImage] = useState<string>('');
   const [selectedSize, setSelectedSize] = useState<ProductSize>('M');
@@ -49,36 +50,45 @@ export const ProductDetailView: React.FC = () => {
   const [revFit, setRevFit] = useState<'Runs Small' | 'True to Size' | 'Runs Large'>('True to Size');
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
-  useEffect(() => {
+  const fetchProductData = async () => {
     if (!selectedProductId) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/products/${selectedProductId}`);
+      if (!res.ok) throw new Error(`Product not found in Supabase (${res.status})`);
+      const data: Product = await res.json();
+      setProduct(data);
+      setSelectedImage(data.images?.[0] || '');
+      setSelectedSize(data.sizes?.[2] || data.sizes?.[0] || 'M');
+      setSelectedColor(data.colors?.[0]?.name || 'Standard');
 
-    const fetchProductData = async () => {
-      setIsLoading(true);
+      // Fetch reviews
       try {
-        const res = await fetch(`/api/products/${selectedProductId}`);
-        if (!res.ok) throw new Error('Product not found');
-        const data: Product = await res.json();
-        setProduct(data);
-        setSelectedImage(data.images?.[0] || '');
-        setSelectedSize(data.sizes?.[2] || data.sizes?.[0] || 'M');
-        setSelectedColor(data.colors?.[0]?.name || 'Standard');
-
-        // Fetch reviews
         const revRes = await fetch(`/api/products/${selectedProductId}/reviews`);
         const revData = await revRes.json();
         setReviews(revData || []);
+      } catch {
+        setReviews([]);
+      }
 
-        // Fetch related products
+      // Fetch related products
+      try {
         const relRes = await fetch(`/api/products?category=${encodeURIComponent(data.category)}`);
         const relData = await relRes.json();
         setRelatedProducts((relData.products || []).filter((p: Product) => p.id !== data.id).slice(0, 4));
-      } catch (err) {
-        console.error('Failed to load product detail:', err);
-      } finally {
-        setIsLoading(false);
+      } catch {
+        setRelatedProducts([]);
       }
-    };
+    } catch (err: any) {
+      console.error('Failed to load product detail from Supabase:', err);
+      setError(err?.message || 'Error fetching product specifications');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchProductData();
   }, [selectedProductId]);
 
@@ -525,7 +535,7 @@ export const ProductDetailView: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-6">
             {relatedProducts.map((p) => (
               <ProductCard key={p.id} product={p} />
             ))}

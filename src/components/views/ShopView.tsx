@@ -11,6 +11,7 @@ export const ShopView: React.FC = () => {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [gridColumns, setGridColumns] = useState<2 | 3 | 4>(4);
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
@@ -18,29 +19,34 @@ export const ShopView: React.FC = () => {
   const categories = ['All', 'Oversized T-Shirts', 'Graphic T-Shirts', 'Hoodies', 'Limited Edition Drops'];
   const allSizes: ProductSize[] = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 
-  useEffect(() => {
-    const fetchFilteredProducts = async () => {
-      setIsLoading(true);
-      try {
-        const queryParams = new URLSearchParams();
-        if (filters.category && filters.category !== 'All') queryParams.set('category', filters.category);
-        if (filters.searchQuery) queryParams.set('search', filters.searchQuery);
-        if (filters.minPrice > 0) queryParams.set('minPrice', filters.minPrice.toString());
-        if (filters.maxPrice < 25000) queryParams.set('maxPrice', filters.maxPrice.toString());
-        if (filters.sizes.length > 0) queryParams.set('sizes', filters.sizes.join(','));
-        if (filters.sortBy) queryParams.set('sortBy', filters.sortBy);
-        if (filters.limitedDropsOnly) queryParams.set('limitedOnly', 'true');
+  const fetchFilteredProducts = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const queryParams = new URLSearchParams();
+      if (filters.category && filters.category !== 'All') queryParams.set('category', filters.category);
+      if (filters.searchQuery) queryParams.set('search', filters.searchQuery);
+      if (filters.minPrice > 0) queryParams.set('minPrice', filters.minPrice.toString());
+      if (filters.maxPrice < 25000) queryParams.set('maxPrice', filters.maxPrice.toString());
+      if (filters.sizes.length > 0) queryParams.set('sizes', filters.sizes.join(','));
+      if (filters.sortBy) queryParams.set('sortBy', filters.sortBy);
+      if (filters.limitedDropsOnly) queryParams.set('limitedOnly', 'true');
 
-        const res = await fetch(`/api/products?${queryParams.toString()}`);
-        const data = await res.json();
-        setProducts(data.products || []);
-      } catch (err) {
-        console.error('Failed to fetch shop products:', err);
-      } finally {
-        setIsLoading(false);
+      const res = await fetch(`/api/products?${queryParams.toString()}`);
+      if (!res.ok) {
+        throw new Error(`HTTP error ${res.status}: Failed to fetch products from Supabase`);
       }
-    };
+      const data = await res.json();
+      setProducts(data.products || []);
+    } catch (err: any) {
+      console.error('Failed to fetch shop products from Supabase:', err);
+      setError(err?.message || 'Failed to load products from Supabase database.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchFilteredProducts();
   }, [filters]);
 
@@ -267,10 +273,24 @@ export const ShopView: React.FC = () => {
 
           {/* Grid Cards */}
           {isLoading ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-6">
               {[1, 2, 3, 4, 5, 6].map((n) => (
-                <div key={n} className="aspect-[3/4] bg-neutral-200 dark:bg-neutral-800 animate-pulse rounded-2xl" />
+                <div key={n} className="aspect-[3/4] bg-neutral-200 dark:bg-neutral-800 animate-pulse rounded-none" />
               ))}
+            </div>
+          ) : error ? (
+            <div className="py-20 text-center space-y-4 bg-white dark:bg-neutral-900 rounded-2xl border border-rose-500/30 p-8">
+              <RotateCcw className="w-12 h-12 text-rose-500 mx-auto" />
+              <h3 className="text-lg font-black text-neutral-900 dark:text-white uppercase">Supabase Connection Error</h3>
+              <p className="text-xs text-rose-500 max-w-sm mx-auto font-mono">
+                {error}
+              </p>
+              <button
+                onClick={fetchFilteredProducts}
+                className="px-6 py-2.5 bg-rose-600 text-white font-bold text-xs uppercase tracking-wider rounded-xl hover:bg-rose-700 transition"
+              >
+                Retry Supabase Query
+              </button>
             </div>
           ) : products.length === 0 ? (
             <div className="py-20 text-center space-y-4 bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-8">
@@ -288,12 +308,12 @@ export const ShopView: React.FC = () => {
             </div>
           ) : (
             <div
-              className={`grid gap-6 ${
+              className={`grid gap-2.5 sm:gap-6 ${
                 gridColumns === 2
-                  ? 'grid-cols-1 sm:grid-cols-2'
+                  ? 'grid-cols-2 sm:grid-cols-2'
                   : gridColumns === 3
-                  ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
-                  : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
+                  ? 'grid-cols-2 sm:grid-cols-2 lg:grid-cols-3'
+                  : 'grid-cols-2 sm:grid-cols-2 lg:grid-cols-4'
               }`}
             >
               {products.map((product) => (

@@ -96,29 +96,7 @@ class DatabaseEngine {
           this.save();
         }
       } else {
-        // Seed default demo data
-        const demoUser: DBUser = {
-          id: 'usr_demo_1',
-          email: 'user@veyro.com',
-          name: 'Kaelen Vance',
-          role: 'user',
-          loyaltyPoints: 350,
-          addresses: [
-            {
-              fullName: 'Kaelen Vance',
-              email: 'user@veyro.com',
-              phone: '+1 (555) 019-2834',
-              address: '742 Mercer Street, Suite 4B',
-              city: 'New York',
-              state: 'NY',
-              zipCode: '10013',
-              country: 'United States'
-            }
-          ],
-          passwordHash: this.hashPassword('password123'),
-          createdAt: new Date().toISOString()
-        };
-
+        // Seed default initial data
         const adminUser: DBUser = {
           id: 'usr_admin_1',
           email: 'admin@veyro.com',
@@ -133,46 +111,8 @@ class DatabaseEngine {
         this.data = {
           products: INITIAL_PRODUCTS,
           reviews: INITIAL_REVIEWS,
-          users: [demoUser, adminUser],
-          orders: [
-            {
-              id: 'VYR-89210',
-              userId: 'usr_demo_1',
-              items: [
-                {
-                  productId: 'veyro-001',
-                  name: 'IDENTITY Heavyweight Boxy Tee',
-                  image: INITIAL_PRODUCTS[0].images[0],
-                  size: 'L',
-                  color: 'Obsidian Black',
-                  price: 4999,
-                  quantity: 1
-                },
-                {
-                  productId: 'veyro-003',
-                  name: 'MONOLITH 480GSM French Terry Hoodie',
-                  image: INITIAL_PRODUCTS[2].images[0],
-                  size: 'L',
-                  color: 'Pitch Black',
-                  price: 11999,
-                  quantity: 1
-                }
-              ],
-              shippingAddress: demoUser.addresses![0],
-              shippingMethod: 'express',
-              subtotal: 16998,
-              discount: 1699,
-              promoCodeApplied: 'IDENTITY10',
-              shippingFee: 0,
-              tax: 765,
-              total: 16064,
-              status: 'Shipped',
-              paymentMethod: 'card',
-              trackingNumber: 'VY-908129384-US',
-              createdAt: '2026-08-02T14:22:00.000Z',
-              estimatedDelivery: '2026-08-09'
-            }
-          ],
+          users: [adminUser],
+          orders: [],
           newsletters: [],
           contactMessages: [],
           appointments: []

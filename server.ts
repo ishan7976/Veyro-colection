@@ -7,8 +7,11 @@ import {
   saveAppointmentToSupabase, 
   fetchAppointmentsFromSupabase, 
   saveOrderToSupabase,
+  fetchOrdersFromSupabase,
   saveProductToSupabase,
   deleteProductFromSupabase,
+  fetchProductsFromSupabase,
+  seedProductsToSupabase,
   updateOrderStatusInSupabase,
   GENERATE_SUPABASE_RLS_SQL,
   SUPABASE_PROJECT_ID,
@@ -69,52 +72,106 @@ const authenticateAdmin = (req: any, res: Response, next: NextFunction) => {
 
 // --- API ROUTES ---
 
-// 1. Get Products list with filters
-app.get('/api/products', (req: Request, res: Response) => {
+// 1. Get Products list with filters from Supabase
+app.get('/api/products', async (req: Request, res: Response) => {
   try {
     const { category, search, minPrice, maxPrice, sizes, sortBy, limitedOnly } = req.query;
 
-    const parsedSizes = sizes ? (Array.isArray(sizes) ? sizes : (sizes as string).split(',')) : undefined;
+    const { success, data: supabaseProducts, error } = await fetchProductsFromSupabase();
 
-    const products = db.getProducts({
-      category: category as string,
-      search: search as string,
-      minPrice: minPrice ? parseFloat(minPrice as string) : undefined,
-      maxPrice: maxPrice ? parseFloat(maxPrice as string) : undefined,
-      sizes: parsedSizes as string[],
-      sortBy: sortBy as string,
-      limitedOnly: limitedOnly === 'true'
-    });
+    if (!success) {
+      return res.status(500).json({ error: error || 'Failed to fetch products from Supabase' });
+    }
 
-    res.json({ products, total: products.length });
+    let products = [...supabaseProducts];
+
+    // Filter by Category
+    if (category && category !== 'All') {
+      products = products.filter(p => (p.category || '').toLowerCase() === (category as string).toLowerCase());
+    }
+
+    // Filter by Search Query
+    if (search) {
+      const q = (search as string).toLowerCase().trim();
+      products = products.filter(p =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.description || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q) ||
+        (Array.isArray(p.tags) && p.tags.some((t: string) => (t || '').toLowerCase().includes(q)))
+      );
+    }
+
+    // Min / Max Price
+    if (minPrice) {
+      const min = parseFloat(minPrice as string);
+      if (!isNaN(min)) products = products.filter(p => p.price >= min);
+    }
+    if (maxPrice) {
+      const max = parseFloat(maxPrice as string);
+      if (!isNaN(max)) products = products.filter(p => p.price <= max);
+    }
+
+    // Sizes filter
+    if (sizes) {
+      const parsedSizes = Array.isArray(sizes) ? sizes : (sizes as string).split(',');
+      products = products.filter(p => p.sizes && Array.isArray(p.sizes) && p.sizes.some((s: string) => parsedSizes.includes(s)));
+    }
+
+    // Limited Drops filter
+    if (limitedOnly === 'true') {
+      products = products.filter(p => p.isLimitedDrop);
+    }
+
+    // Sorting
+    if (sortBy === 'price-low') {
+      products.sort((a, b) => a.price - b.price);
+    } else if (sortBy === 'price-high') {
+      products.sort((a, b) => b.price - a.price);
+    } else if (sortBy === 'rating') {
+      products.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    } else if (sortBy === 'newest') {
+      products.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    }
+
+    res.json({ products, total: products.length, source: error ? 'notice' : 'supabase' });
+  } catch (err: any) {
+    console.error('Failed to fetch products from Supabase:', err);
+    res.json({ products: [], total: 0, error: 'Failed to fetch products' });
+  }
+});
+
+// 2. Get Single Product from Supabase
+app.get('/api/products/:id', async (req: Request, res: Response) => {
+  try {
+    const { success, data: products } = await fetchProductsFromSupabase();
+    const product = products.find(p => p.id === req.params.id || p.slug === req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: 'Product not found in Supabase' });
+    }
+    res.json(product);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch products' });
+    res.status(500).json({ error: 'Failed to fetch product details from Supabase' });
   }
 });
 
-// 2. Get Single Product
-app.get('/api/products/:id', (req: Request, res: Response) => {
-  const product = db.getProductById(req.params.id);
-  if (!product) {
-    return res.status(404).json({ error: 'Product not found' });
+// 3. Get Categories Summary from Supabase
+app.get('/api/categories', async (req: Request, res: Response) => {
+  try {
+    const { data: allProducts } = await fetchProductsFromSupabase();
+    const categories = [
+      'Oversized T-Shirts',
+      'Graphic T-Shirts',
+      'Hoodies',
+      'Limited Edition Drops'
+    ].map(catName => ({
+      name: catName,
+      count: (allProducts || []).filter(p => p.category === catName).length
+    }));
+
+    res.json(categories);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch categories summary' });
   }
-  res.json(product);
-});
-
-// 3. Get Categories Summary
-app.get('/api/categories', (req: Request, res: Response) => {
-  const allProducts = db.getProducts();
-  const categories = [
-    'Oversized T-Shirts',
-    'Graphic T-Shirts',
-    'Hoodies',
-    'Limited Edition Drops'
-  ].map(catName => ({
-    name: catName,
-    count: allProducts.filter(p => p.category === catName).length
-  }));
-
-  res.json(categories);
 });
 
 // 4. Auth - Register
@@ -203,11 +260,21 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       paymentMethod: paymentMethod || 'card'
     });
 
-    // Save to Supabase database asynchronously
-    saveOrderToSupabase(order).catch(err => console.warn('Supabase order sync warning:', err));
+    console.log(`[API Orders] Creating order ${order.id} for userId: ${userId || 'guest'}`);
+    // Save to Supabase database synchronously with logging
+    const supaRes = await saveOrderToSupabase(order);
+    if (!supaRes.success) {
+      console.warn('[API Orders] Supabase order insertion notice:', supaRes.error);
+    } else {
+      console.log(`[API Orders] Order ${order.id} successfully saved to Supabase orders table.`);
+    }
 
-    res.status(201).json(order);
+    res.status(201).json({
+      ...order,
+      supabaseSynced: supaRes.success
+    });
   } catch (err) {
+    console.error('[API Orders] Failed to place order:', err);
     res.status(500).json({ error: 'Failed to place order' });
   }
 });
@@ -419,17 +486,18 @@ app.post('/api/contact', (req: Request, res: Response) => {
 // ==========================================
 
 // A. Overview Analytics & Stats
-app.get('/api/admin/overview', authenticateAdmin, (req: Request, res: Response) => {
+app.get('/api/admin/overview', authenticateAdmin, async (req: Request, res: Response) => {
   try {
-    const products = db.getProducts();
-    const orders = db.getAllOrders();
+    const { data: products } = await fetchProductsFromSupabase();
+    const { data: supaOrders } = await fetchOrdersFromSupabase();
+    const orders = supaOrders && supaOrders.length > 0 ? supaOrders : db.getAllOrders();
     const users = db.getAllUsers();
     const appointments = db.getAppointments();
 
     const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
-    const lowStockCount = products.filter(p => !p.inStock).length;
+    const lowStockCount = (products || []).filter(p => !p.inStock).length;
 
-    const categoryStats = products.reduce((acc: Record<string, number>, p) => {
+    const categoryStats = (products || []).reduce((acc: Record<string, number>, p) => {
       acc[p.category] = (acc[p.category] || 0) + 1;
       return acc;
     }, {});
@@ -437,7 +505,7 @@ app.get('/api/admin/overview', authenticateAdmin, (req: Request, res: Response) 
     res.json({
       totalRevenue,
       totalOrders: orders.length,
-      totalProducts: products.length,
+      totalProducts: (products || []).length,
       totalCustomers: users.length,
       totalAppointments: appointments.length,
       lowStockCount,
@@ -446,17 +514,34 @@ app.get('/api/admin/overview', authenticateAdmin, (req: Request, res: Response) 
       supabaseProjectId: SUPABASE_PROJECT_ID
     });
   } catch (err) {
+    console.error('Failed to generate overview metrics:', err);
     res.status(500).json({ error: 'Failed to generate overview metrics' });
   }
 });
 
-// B. Product Management - Get All
-app.get('/api/admin/products', authenticateAdmin, (req: Request, res: Response) => {
+// B. Product Management - Get All from Supabase
+app.get('/api/admin/products', authenticateAdmin, async (req: Request, res: Response) => {
   try {
-    const products = db.getProducts();
+    const { success, data: products, error } = await fetchProductsFromSupabase();
+    if (!success) {
+      return res.status(500).json({ error: error || 'Failed to fetch products from Supabase' });
+    }
     res.json(products);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch products' });
+    res.status(500).json({ error: 'Failed to fetch admin products from Supabase' });
+  }
+});
+
+// B2. Manual Product Seed Route
+app.post('/api/admin/seed-products', authenticateAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await seedProductsToSupabase();
+    if (!result.success) {
+      return res.status(500).json({ error: result.error || 'Failed to seed products into Supabase' });
+    }
+    res.json({ message: 'Veyro products seeded successfully into Supabase', count: result.data.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to seed products' });
   }
 });
 
@@ -536,12 +621,17 @@ app.delete('/api/admin/products/:id', authenticateAdmin, async (req: Request, re
   }
 });
 
-// F. Order Management - Get All Orders
-app.get('/api/admin/orders', authenticateAdmin, (req: Request, res: Response) => {
+// F. Order Management - Get All Orders from Supabase
+app.get('/api/admin/orders', authenticateAdmin, async (req: Request, res: Response) => {
   try {
-    const orders = db.getAllOrders();
+    const { success, data: orders, error } = await fetchOrdersFromSupabase();
+    if (!success) {
+      console.warn('[API Admin Orders] Supabase fetch warning:', error);
+      return res.json(db.getAllOrders());
+    }
     res.json(orders);
   } catch (err) {
+    console.error('[API Admin Orders] Failed to fetch orders:', err);
     res.status(500).json({ error: 'Failed to fetch orders' });
   }
 });
