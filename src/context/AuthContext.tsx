@@ -219,10 +219,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoading(true);
       localStorage.setItem('veyro_oauth_redirect', 'account');
 
+      // Determine redirect URL dynamically based on current origin (production or localhost)
+      const envSiteUrl = (import.meta as any).env?.VITE_SITE_URL;
+      const redirectUrl = typeof window !== 'undefined' && window.location?.origin
+        ? `${window.location.origin}/`
+        : (envSiteUrl || 'https://fashion.netlify.app/').replace(/\/?$/, '/');
+
+      console.log('[Google OAuth] Redirect URL:', redirectUrl);
+
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}`,
+          redirectTo: redirectUrl,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
