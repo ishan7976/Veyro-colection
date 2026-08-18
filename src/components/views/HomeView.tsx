@@ -4,6 +4,7 @@ import { ProductCard } from '../common/ProductCard';
 import { QuickViewModal } from '../common/QuickViewModal';
 import { Product } from '../../types';
 import { formatPrice } from '../../lib/currency';
+import { fetchProductsFromSupabase } from '../../lib/supabase';
 import { ArrowRight, Sparkles, Flame, Shield, Star, Instagram, Layers, ChevronRight, CheckCircle2 } from 'lucide-react';
 
 export const HomeView: React.FC = () => {
@@ -19,18 +20,29 @@ export const HomeView: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/products');
-      if (!res.ok) {
-        throw new Error('Failed to load products from Supabase database');
-      }
-      const data = await res.json();
-      const all: Product[] = data.products || [];
+      const supaRes = await fetchProductsFromSupabase();
 
+      // 3. Required Console Logs
+      console.log('[HomeView] Supabase response data:', supaRes.data);
+      console.log('[HomeView] Supabase error:', supaRes.error);
+      console.log('[HomeView] Number of products received:', supaRes.data ? supaRes.data.length : 0);
+
+      if (!supaRes.success && supaRes.error) {
+        setError(supaRes.error);
+        setFeaturedProducts([]);
+        setNewArrivals([]);
+        return;
+      }
+
+      const all: Product[] = supaRes.data || [];
       setFeaturedProducts(all.slice(0, 4));
-      setNewArrivals(all.filter((p) => p.isNewArrival || p.isLimitedDrop).slice(0, 4));
+      setNewArrivals(all.filter((p) => p.isNewArrival || p.isLimitedDrop).length > 0 
+        ? all.filter((p) => p.isNewArrival || p.isLimitedDrop).slice(0, 4)
+        : all.slice(0, 4)
+      );
     } catch (err: any) {
-      console.error('Failed to load home products from Supabase:', err);
-      setError(err?.message || 'Error fetching products');
+      console.error('[HomeView] Failed to load home products from Supabase:', err);
+      setError(err?.message || 'Error fetching products from Supabase');
     } finally {
       setIsLoading(false);
     }

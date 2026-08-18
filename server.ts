@@ -8,11 +8,13 @@ import {
   fetchAppointmentsFromSupabase, 
   saveOrderToSupabase,
   fetchOrdersFromSupabase,
+  fetchCustomersFromSupabase,
   saveProductToSupabase,
   deleteProductFromSupabase,
   fetchProductsFromSupabase,
   seedProductsToSupabase,
   updateOrderStatusInSupabase,
+  updateProductStockInSupabase,
   GENERATE_SUPABASE_RLS_SQL,
   SUPABASE_PROJECT_ID,
   SUPABASE_URL
@@ -25,6 +27,36 @@ const app = express();
 
 app.use(express.json());
 
+// Helper to decode either a local JWT or a Supabase Auth JWT token
+const decodeToken = (token: string): { userId?: string; email?: string; role?: string } | null => {
+  if (!token) return null;
+  try {
+    const verified: any = jsonwebtoken.verify(token, JWT_SECRET);
+    if (verified) {
+      return {
+        userId: verified.userId || verified.sub || verified.id,
+        email: verified.email,
+        role: verified.role
+      };
+    }
+  } catch (err) {
+    // If not signed with local secret, decode token payload (e.g. Supabase Auth JWT)
+    try {
+      const decoded: any = jsonwebtoken.decode(token);
+      if (decoded) {
+        return {
+          userId: decoded.sub || decoded.userId || decoded.id,
+          email: decoded.email,
+          role: decoded.user_metadata?.role || decoded.app_metadata?.role || decoded.role
+        };
+      }
+    } catch (e) {
+      return null;
+    }
+  }
+  return null;
+};
+
 // Auth middleware helper
 const authenticateToken = (req: any, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
@@ -34,13 +66,13 @@ const authenticateToken = (req: any, res: Response, next: NextFunction) => {
     return res.status(401).json({ error: 'Access token required' });
   }
 
-  try {
-    const decoded: any = jsonwebtoken.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
+  const decoded = decodeToken(token);
+  if (!decoded) {
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
+
+  req.user = decoded;
+  next();
 };
 
 // Admin Auth Middleware
@@ -52,22 +84,27 @@ const authenticateAdmin = (req: any, res: Response, next: NextFunction) => {
     return res.status(401).json({ error: 'Admin access token required' });
   }
 
-  try {
-    const decoded: any = jsonwebtoken.verify(token, JWT_SECRET);
-    const user = db.getUserById(decoded.userId) || (decoded.email ? db.getUserByEmail(decoded.email) : undefined);
-    
-    const cleanDecodedEmail = (decoded.email || '').toLowerCase().trim();
-    const isAdmin = user?.role === 'admin' || cleanDecodedEmail === 'ishansharma3305@gmail.com' || cleanDecodedEmail === 'admin@veyro.com';
-
-    if (!isAdmin) {
-      return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
-    }
-
-    req.user = user || { id: decoded.userId || 'usr_admin', email: decoded.email, role: 'admin' };
-    next();
-  } catch (err) {
+  const decoded = decodeToken(token);
+  if (!decoded) {
     return res.status(403).json({ error: 'Invalid or expired session token' });
   }
+
+  const cleanEmail = (decoded.email || '').toLowerCase().trim();
+  const dbUser = decoded.userId ? db.getUserById(decoded.userId) : (cleanEmail ? db.getUserByEmail(cleanEmail) : undefined);
+
+  const isAdmin = 
+    decoded.role === 'admin' ||
+    dbUser?.role === 'admin' ||
+    cleanEmail === 'ishansharma3305@gmail.com' ||
+    cleanEmail === 'ishan.sharma.7976@gmail.com' ||
+    cleanEmail === 'admin@veyro.com';
+
+  if (!isAdmin) {
+    return res.status(403).json({ error: 'Access denied. Administrator privileges required.' });
+  }
+
+  req.user = dbUser || { id: decoded.userId || 'usr_admin', email: cleanEmail, role: 'admin' };
+  next();
 };
 
 // --- API ROUTES ---
@@ -80,10 +117,14 @@ app.get('/api/products', async (req: Request, res: Response) => {
     const { success, data: supabaseProducts, error } = await fetchProductsFromSupabase();
 
     if (!success) {
-      return res.status(500).json({ error: error || 'Failed to fetch products from Supabase' });
+      return res.status(500).json({
+        error: error || 'Failed to fetch products from Supabase',
+        products: [],
+        total: 0
+      });
     }
 
-    let products = [...supabaseProducts];
+    let products = [...(supabaseProducts || [])];
 
     // Filter by Category
     if (category && category !== 'All') {
@@ -123,9 +164,9 @@ app.get('/api/products', async (req: Request, res: Response) => {
     }
 
     // Sorting
-    if (sortBy === 'price-low') {
+    if (sortBy === 'price-low' || sortBy === 'price-asc') {
       products.sort((a, b) => a.price - b.price);
-    } else if (sortBy === 'price-high') {
+    } else if (sortBy === 'price-high' || sortBy === 'price-desc') {
       products.sort((a, b) => b.price - a.price);
     } else if (sortBy === 'rating') {
       products.sort((a, b) => (b.rating || 0) - (a.rating || 0));
@@ -133,31 +174,37 @@ app.get('/api/products', async (req: Request, res: Response) => {
       products.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     }
 
-    res.json({ products, total: products.length, source: error ? 'notice' : 'supabase' });
+    res.json({ products, total: products.length, source: 'supabase' });
   } catch (err: any) {
     console.error('Failed to fetch products from Supabase:', err);
-    res.json({ products: [], total: 0, error: 'Failed to fetch products' });
+    res.status(500).json({ products: [], total: 0, error: err?.message || 'Failed to fetch products from Supabase' });
   }
 });
 
 // 2. Get Single Product from Supabase
 app.get('/api/products/:id', async (req: Request, res: Response) => {
   try {
-    const { success, data: products } = await fetchProductsFromSupabase();
-    const product = products.find(p => p.id === req.params.id || p.slug === req.params.id);
+    const { success, data: products, error } = await fetchProductsFromSupabase();
+    if (!success) {
+      return res.status(500).json({ error: error || 'Failed to fetch products from Supabase' });
+    }
+    const product = (products || []).find(p => String(p.id) === String(req.params.id) || p.slug === req.params.id);
     if (!product) {
-      return res.status(404).json({ error: 'Product not found in Supabase' });
+      return res.status(404).json({ error: `Product "${req.params.id}" not found in Supabase database` });
     }
     res.json(product);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch product details from Supabase' });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to fetch product details from Supabase' });
   }
 });
 
 // 3. Get Categories Summary from Supabase
 app.get('/api/categories', async (req: Request, res: Response) => {
   try {
-    const { data: allProducts } = await fetchProductsFromSupabase();
+    const { success, data: allProducts, error } = await fetchProductsFromSupabase();
+    if (!success) {
+      return res.status(500).json({ error: error || 'Failed to fetch categories from Supabase' });
+    }
     const categories = [
       'Oversized T-Shirts',
       'Graphic T-Shirts',
@@ -169,8 +216,8 @@ app.get('/api/categories', async (req: Request, res: Response) => {
     }));
 
     res.json(categories);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch categories summary' });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to fetch categories summary' });
   }
 });
 
@@ -489,13 +536,25 @@ app.post('/api/contact', (req: Request, res: Response) => {
 app.get('/api/admin/overview', authenticateAdmin, async (req: Request, res: Response) => {
   try {
     const { data: products } = await fetchProductsFromSupabase();
-    const { data: supaOrders } = await fetchOrdersFromSupabase();
-    const orders = supaOrders && supaOrders.length > 0 ? supaOrders : db.getAllOrders();
-    const users = db.getAllUsers();
+    const { success: ordersSuccess, data: supaOrders, error: ordersError } = await fetchOrdersFromSupabase();
+    // Only real orders from Supabase public.orders table (no mock fallback)
+    const orders = (ordersSuccess && Array.isArray(supaOrders)) ? supaOrders : [];
+    const { success: custSuccess, data: supaCustomers } = await fetchCustomersFromSupabase();
+    const customers = (custSuccess && Array.isArray(supaCustomers)) ? supaCustomers : [];
     const appointments = db.getAppointments();
 
-    const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
-    const lowStockCount = (products || []).filter(p => !p.inStock).length;
+    const totalOrders = orders.length;
+    const totalRevenue = orders.reduce((sum, o) => {
+      const orderTotal = Number(o.total) || 0;
+      return sum + orderTotal;
+    }, 0);
+    const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+    const processingQueue = orders.filter(o => {
+      const st = (o.status || '').toString().trim().toLowerCase();
+      return st === 'processing';
+    }).length;
+
+    const lowStockCount = (products || []).filter(p => !p.inStock || (p.stockQuantity !== undefined && p.stockQuantity < 10)).length;
 
     const categoryStats = (products || []).reduce((acc: Record<string, number>, p) => {
       acc[p.category] = (acc[p.category] || 0) + 1;
@@ -504,9 +563,11 @@ app.get('/api/admin/overview', authenticateAdmin, async (req: Request, res: Resp
 
     res.json({
       totalRevenue,
-      totalOrders: orders.length,
+      totalOrders,
+      averageOrderValue,
+      processingQueue,
       totalProducts: (products || []).length,
-      totalCustomers: users.length,
+      totalCustomers: customers.length || db.getAllUsers().length,
       totalAppointments: appointments.length,
       lowStockCount,
       recentOrders: orders.slice(0, 6),
@@ -626,41 +687,73 @@ app.get('/api/admin/orders', authenticateAdmin, async (req: Request, res: Respon
   try {
     const { success, data: orders, error } = await fetchOrdersFromSupabase();
     if (!success) {
-      console.warn('[API Admin Orders] Supabase fetch warning:', error);
-      return res.json(db.getAllOrders());
+      console.warn('[API Admin Orders] Supabase fetch error:', error);
+      return res.json([]);
     }
-    res.json(orders);
+    res.json(orders || []);
   } catch (err) {
     console.error('[API Admin Orders] Failed to fetch orders:', err);
     res.status(500).json({ error: 'Failed to fetch orders' });
   }
 });
 
-// G. Order Management - Update Status
+// G. Order Management - Update Status & Shipping Tracking
 app.put('/api/admin/orders/:id/status', authenticateAdmin, async (req: Request, res: Response) => {
   try {
-    const { status, trackingNumber } = req.body;
+    const { status, trackingNumber, paymentStatus } = req.body;
     if (!status) {
       return res.status(400).json({ error: 'Order status is required' });
     }
 
     const updatedOrder = db.updateOrderStatus(req.params.id, status, trackingNumber);
-    if (!updatedOrder) {
-      return res.status(404).json({ error: 'Order not found' });
-    }
 
-    // Sync order status change to Supabase
-    await updateOrderStatusInSupabase(req.params.id, status);
+    // Sync order status, tracking_number and payment_status to Supabase
+    const supabaseRes = await updateOrderStatusInSupabase(req.params.id, status, trackingNumber, paymentStatus);
 
-    res.json(updatedOrder);
+    res.json({
+      ...(updatedOrder || { id: req.params.id, status, trackingNumber, paymentStatus }),
+      supabaseSynced: supabaseRes.success
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update order status' });
   }
 });
 
-// H. Customer Management - Get All Users
-app.get('/api/admin/customers', authenticateAdmin, (req: Request, res: Response) => {
+// G2. Product Stock Management - Update Stock Quantity
+app.put('/api/admin/products/:id/stock', authenticateAdmin, async (req: Request, res: Response) => {
   try {
+    const { stockQuantity } = req.body;
+    if (stockQuantity === undefined || isNaN(Number(stockQuantity))) {
+      return res.status(400).json({ error: 'Valid stockQuantity is required' });
+    }
+
+    const qty = Number(stockQuantity);
+    const updatedProd = db.updateProduct(req.params.id, {
+      stockQuantity: qty,
+      inStock: qty > 0
+    });
+
+    const supabaseRes = await updateProductStockInSupabase(req.params.id, qty);
+
+    res.json({
+      ...(updatedProd || { id: req.params.id, stockQuantity: qty, inStock: qty > 0 }),
+      supabaseSynced: supabaseRes.success
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update product stock' });
+  }
+});
+
+// H. Customer Management - Get All Customers from Supabase profiles
+app.get('/api/admin/customers', authenticateAdmin, async (req: Request, res: Response) => {
+  try {
+    const { success, data: customers, error } = await fetchCustomersFromSupabase();
+    
+    if (success && customers && customers.length > 0) {
+      return res.json(customers);
+    }
+
+    // Fallback to local DB if profiles table is empty or error
     const users = db.getAllUsers();
     const orders = db.getAllOrders();
 
@@ -707,6 +800,11 @@ app.get('/api/admin/supabase/rls-sql', authenticateAdmin, (req: Request, res: Re
     projectId: SUPABASE_PROJECT_ID,
     supabaseUrl: SUPABASE_URL
   });
+});
+
+// Explicit JSON 404 Handler for /api/* to prevent falling through to Vite HTML middleware
+app.all('/api/*', (req: Request, res: Response) => {
+  res.status(404).json({ error: `API route not found: ${req.method} ${req.path}` });
 });
 
 export { app };

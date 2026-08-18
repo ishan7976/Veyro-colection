@@ -5,7 +5,20 @@ import { useNavigation } from '../../context/NavigationContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Product, Order, User, ProductCategory, ProductSize } from '../../types';
 import { formatPrice } from '../../lib/currency';
-import { supabase, saveProductToSupabase, fetchOrderStatsFromSupabase, uploadProductImageToSupabase } from '../../lib/supabase';
+import { 
+  supabase, 
+  saveProductToSupabase, 
+  fetchOrderStatsFromSupabase, 
+  uploadProductImageToSupabase,
+  fetchProductsFromSupabase,
+  fetchOrdersFromSupabase,
+  fetchCustomersFromSupabase,
+  GENERATE_SUPABASE_RLS_SQL,
+  updateOrderStatusInSupabase,
+  updateProductStockInSupabase,
+  deleteProductFromSupabase,
+  SUPABASE_PROJECT_ID
+} from '../../lib/supabase';
 import { 
   LayoutDashboard, 
   Package, 
@@ -114,6 +127,7 @@ export const AdminDashboardView: React.FC = () => {
   const [prodImage1, setProdImage1] = useState('');
   const [prodImage2, setProdImage2] = useState('');
   const [prodInStock, setProdInStock] = useState(true);
+  const [prodStockQuantity, setProdStockQuantity] = useState('25');
   const [prodNewArrival, setProdNewArrival] = useState(true);
   const [prodLimitedDrop, setProdLimitedDrop] = useState(false);
   const [prodTrending, setProdTrending] = useState(false);
@@ -124,7 +138,7 @@ export const AdminDashboardView: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
-  // Handle File Selection and Direct Upload to Supabase Storage Bucket 'product-images'
+  // Handle File Selection and Direct Upload to Supabase Storage Bucket 'products'
   const handleImageFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -152,7 +166,7 @@ export const AdminDashboardView: React.FC = () => {
     const localUrl = URL.createObjectURL(file);
     setImagePreviewUrl(localUrl);
 
-    // Upload to Supabase Storage bucket 'product-images'
+    // Upload directly to Supabase Storage bucket 'product-images'
     setIsUploadingImage(true);
     setUploadProgress('Uploading image to Supabase Storage bucket "product-images"...');
 
@@ -162,7 +176,7 @@ export const AdminDashboardView: React.FC = () => {
         setProdImage1(res.publicUrl);
         addToast({
           title: 'Image Uploaded to Supabase',
-          message: 'Public URL retrieved and ready to save into products.image_url column.',
+          message: 'Public URL generated and set automatically for products.image_url.',
           type: 'success'
         });
       } else {
@@ -184,6 +198,8 @@ export const AdminDashboardView: React.FC = () => {
   const [supabaseOrderStats, setSupabaseOrderStats] = useState<{
     totalOrders: number;
     totalRevenue: number;
+    averageOrderValue: number;
+    processingQueue: number;
     statusBreakdown: Record<string, number>;
     lastSyncedAt: string | null;
     isLoading: boolean;
@@ -192,6 +208,8 @@ export const AdminDashboardView: React.FC = () => {
   }>({
     totalOrders: 0,
     totalRevenue: 0,
+    averageOrderValue: 0,
+    processingQueue: 0,
     statusBreakdown: {},
     lastSyncedAt: null,
     isLoading: true,
@@ -210,6 +228,8 @@ export const AdminDashboardView: React.FC = () => {
         setSupabaseOrderStats({
           totalOrders: res.totalOrders,
           totalRevenue: res.totalRevenue,
+          averageOrderValue: res.averageOrderValue,
+          processingQueue: res.processingQueue,
           statusBreakdown: res.statusBreakdown,
           lastSyncedAt: new Date().toLocaleTimeString(),
           isLoading: false,
@@ -242,30 +262,86 @@ export const AdminDashboardView: React.FC = () => {
     try {
       const headers = { Authorization: `Bearer ${token}` };
 
-      // Overview KPI metrics
-      const ovRes = await fetch('/api/admin/overview', { headers });
-      if (ovRes.ok) setOverviewData(await ovRes.json());
+      const safeFetchJson = async (url: string) => {
+        try {
+          const res = await fetch(url, { headers });
+          const contentType = res.headers.get('content-type') || '';
+          if (res.ok && contentType.includes('application/json')) {
+            return await res.json();
+          }
+          return null;
+        } catch (e) {
+          return null;
+        }
+      };
 
-      // Products
-      const prodRes = await fetch('/api/admin/products', { headers });
-      if (prodRes.ok) setProducts(await prodRes.json());
+      // 1. Products (from API or direct Supabase client)
+      let productsList: Product[] | null = await safeFetchJson('/api/admin/products');
+      if (!productsList) {
+        const supaProdRes = await fetchProductsFromSupabase();
+        if (supaProdRes.success && supaProdRes.data) {
+          productsList = supaProdRes.data;
+        }
+      }
+      if (productsList) setProducts(productsList);
 
-      // Orders
-      const ordRes = await fetch('/api/admin/orders', { headers });
-      if (ordRes.ok) setOrders(await ordRes.json());
+      // 2. Orders (from API or direct Supabase client)
+      let ordersList: Order[] | null = await safeFetchJson('/api/admin/orders');
+      if (!ordersList) {
+        const supaOrdRes = await fetchOrdersFromSupabase();
+        if (supaOrdRes.success && supaOrdRes.data) {
+          ordersList = supaOrdRes.data;
+        }
+      }
+      if (ordersList) setOrders(ordersList);
 
-      // Customers
-      const custRes = await fetch('/api/admin/customers', { headers });
-      if (custRes.ok) setCustomers(await custRes.json());
+      // 3. Customers (from API or direct Supabase client)
+      let customersList: User[] | null = await safeFetchJson('/api/admin/customers');
+      if (!customersList) {
+        const supaCustRes = await fetchCustomersFromSupabase();
+        if (supaCustRes.success && supaCustRes.data) {
+          customersList = supaCustRes.data;
+        }
+      }
+      if (customersList) setCustomers(customersList);
 
-      // RLS SQL Generator
-      const rlsRes = await fetch('/api/admin/supabase/rls-sql', { headers });
-      if (rlsRes.ok) {
-        const rlsData = await rlsRes.json();
+      // 4. Overview KPI metrics (from API or compute from live lists)
+      const ovData = await safeFetchJson('/api/admin/overview');
+      if (ovData) {
+        setOverviewData(ovData);
+      } else {
+        const prods = productsList || [];
+        const ords = ordersList || [];
+        const custs = customersList || [];
+        const totalRev = ords.reduce((sum, o) => sum + (o.total || 0), 0);
+        const lowStock = prods.filter(p => !p.inStock || (p.stockQuantity !== undefined && p.stockQuantity < 10)).length;
+        const categoryStats = prods.reduce((acc: Record<string, number>, p) => {
+          acc[p.category] = (acc[p.category] || 0) + 1;
+          return acc;
+        }, {});
+
+        setOverviewData({
+          totalRevenue: totalRev,
+          totalOrders: ords.length,
+          totalProducts: prods.length,
+          totalCustomers: custs.length,
+          totalAppointments: 0,
+          lowStockCount: lowStock,
+          recentOrders: ords.slice(0, 6),
+          categoryStats,
+          supabaseProjectId: SUPABASE_PROJECT_ID
+        });
+      }
+
+      // 5. RLS SQL Generator
+      const rlsData = await safeFetchJson('/api/admin/supabase/rls-sql');
+      if (rlsData?.rlsSql) {
         setRlsSql(rlsData.rlsSql);
+      } else {
+        setRlsSql(GENERATE_SUPABASE_RLS_SQL);
       }
     } catch (err) {
-      console.error('Error loading admin dashboard:', err);
+      console.error('Notice updating admin dashboard:', err);
     } finally {
       setIsLoading(false);
     }
@@ -354,6 +430,7 @@ export const AdminDashboardView: React.FC = () => {
       setImagePreviewUrl(initialImg || null);
       setProdImage2(productToEdit.images?.[1] || '');
       setProdInStock(productToEdit.inStock);
+      setProdStockQuantity((productToEdit.stockQuantity ?? (productToEdit.inStock ? 25 : 0)).toString());
       setProdNewArrival(!!productToEdit.isNewArrival);
       setProdLimitedDrop(!!productToEdit.isLimitedDrop);
       setProdTrending(!!productToEdit.isTrending);
@@ -371,6 +448,7 @@ export const AdminDashboardView: React.FC = () => {
       setImagePreviewUrl(null);
       setProdImage2('');
       setProdInStock(true);
+      setProdStockQuantity('25');
       setProdNewArrival(true);
       setProdLimitedDrop(false);
       setProdTrending(true);
@@ -393,8 +471,10 @@ export const AdminDashboardView: React.FC = () => {
 
     setIsSavingProduct(true);
 
+    const parsedStock = Number(prodStockQuantity) || 0;
+
     // Collect all form fields using exact column schema requested:
-    // name, description, price, category, original_price, fabric_gsm, image_url, in_stock, new_arrival_badge, limited_drop_badge
+    // name, description, price, category, original_price, fabric_gsm, image_url, in_stock, stock_quantity, new_arrival_badge, limited_drop_badge
     const productPayload = {
       id: editingProduct ? editingProduct.id : undefined,
       name: prodName,
@@ -404,7 +484,10 @@ export const AdminDashboardView: React.FC = () => {
       original_price: prodOriginalPrice ? Number(prodOriginalPrice) : null,
       fabric_gsm: Number(prodGsm) || 280,
       image_url: prodImage1,
-      in_stock: prodInStock,
+      stock_quantity: parsedStock,
+      stockQuantity: parsedStock,
+      in_stock: parsedStock > 0 && prodInStock,
+      inStock: parsedStock > 0 && prodInStock,
       new_arrival_badge: Boolean(prodNewArrival),
       limited_drop_badge: Boolean(prodLimitedDrop),
       // App state compatibility aliases
@@ -412,7 +495,6 @@ export const AdminDashboardView: React.FC = () => {
       gsm: Number(prodGsm) || 280,
       fit: prodFit || 'Oversized Boxy Fit',
       images: [prodImage1, prodImage2].filter(Boolean),
-      inStock: prodInStock,
       isNewArrival: Boolean(prodNewArrival),
       isLimitedDrop: Boolean(prodLimitedDrop),
       isTrending: Boolean(prodTrending),
@@ -560,8 +642,13 @@ export const AdminDashboardView: React.FC = () => {
     }
   };
 
-  // Update Order Status
-  const handleUpdateOrderStatus = async (orderId: string, status: Order['status']) => {
+  // Update Order Status & Shipping Tracking
+  const handleUpdateOrderStatus = async (
+    orderId: string, 
+    status: Order['status'], 
+    trackingNumber?: string,
+    paymentStatus?: string
+  ) => {
     try {
       const res = await fetch(`/api/admin/orders/${orderId}/status`, {
         method: 'PUT',
@@ -569,18 +656,50 @@ export const AdminDashboardView: React.FC = () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ status })
+        body: JSON.stringify({ status, trackingNumber, paymentStatus })
       });
 
       if (res.ok) {
         addToast({ title: `Order ${orderId} Updated`, message: `Status set to ${status}`, type: 'success' });
         fetchDashboardData();
         if (selectedOrderDetails?.id === orderId) {
-          setSelectedOrderDetails(prev => prev ? { ...prev, status } : null);
+          setSelectedOrderDetails(prev => prev ? { 
+            ...prev, 
+            status, 
+            trackingNumber: trackingNumber !== undefined ? trackingNumber : prev.trackingNumber,
+            paymentStatus: paymentStatus !== undefined ? (paymentStatus as any) : prev.paymentStatus
+          } : null);
         }
       }
     } catch (err) {
       addToast({ title: 'Status Update Failed', message: 'Server error', type: 'error' });
+    }
+  };
+
+  // Quick Stock Quantity Update
+  const handleQuickUpdateStock = async (productId: string, newStockQty: number) => {
+    try {
+      const res = await fetch(`/api/admin/products/${productId}/stock`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ stockQuantity: newStockQty })
+      });
+
+      if (res.ok) {
+        addToast({
+          title: 'Stock Updated',
+          message: `Product stock level set to ${newStockQty} units.`,
+          type: 'success'
+        });
+        fetchDashboardData();
+      } else {
+        addToast({ title: 'Stock Update Notice', message: 'Failed to update stock quantity', type: 'error' });
+      }
+    } catch (err) {
+      addToast({ title: 'Stock Update Error', message: 'Server error', type: 'error' });
     }
   };
 
@@ -965,8 +1084,11 @@ export const AdminDashboardView: React.FC = () => {
                       </span>
                     )}
                     <button
-                      onClick={() => fetchLiveSupabaseOrderStats(true)}
-                      disabled={supabaseOrderStats.isRefreshing}
+                      onClick={() => {
+                        fetchLiveSupabaseOrderStats(true);
+                        fetchDashboardData();
+                      }}
+                      disabled={supabaseOrderStats.isRefreshing || isLoading}
                       className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-mono font-bold uppercase rounded-xl transition flex items-center gap-1.5 cursor-pointer border border-neutral-700 disabled:opacity-50"
                       title="Fetch latest metrics directly from Supabase orders table"
                     >
@@ -1241,35 +1363,43 @@ export const AdminDashboardView: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-200/60 dark:divide-neutral-800/60">
-                      {orders.slice(0, 5).map(o => (
-                        <tr key={o.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/30 transition">
-                          <td className="py-3 font-mono text-amber-600 dark:text-amber-400 font-bold">{o.id}</td>
-                          <td className="py-3 font-medium text-neutral-900 dark:text-white">{o.shippingAddress?.fullName}</td>
-                          <td className="py-3 text-neutral-500 dark:text-neutral-400">{o.items?.length || 1} items</td>
-                          <td className="py-3 font-mono font-bold text-neutral-900 dark:text-white">{formatPrice(o.total)}</td>
-                          <td className="py-3">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${
-                              o.status === 'Delivered' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' :
-                              o.status === 'Shipped' ? 'bg-sky-500/20 text-sky-600 dark:text-sky-400' :
-                              'bg-amber-500/20 text-amber-600 dark:text-amber-400'
-                            }`}>
-                              {o.status}
-                            </span>
-                          </td>
-                          <td className="py-3 text-right">
-                            <button
-                              onClick={() => {
-                                setSelectedOrderDetails(o);
-                                setActiveTab('orders');
-                              }}
-                              className="p-1.5 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-lg text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition cursor-pointer"
-                              title="View Order Details"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
+                      {orders.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center text-neutral-400 font-mono text-xs">
+                            No orders found in Supabase public.orders table.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        orders.slice(0, 5).map(o => (
+                          <tr key={o.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/30 transition">
+                            <td className="py-3 font-mono text-amber-600 dark:text-amber-400 font-bold">{o.id}</td>
+                            <td className="py-3 font-medium text-neutral-900 dark:text-white">{o.shippingAddress?.fullName}</td>
+                            <td className="py-3 text-neutral-500 dark:text-neutral-400">{o.items?.length || 1} items</td>
+                            <td className="py-3 font-mono font-bold text-neutral-900 dark:text-white">{formatPrice(o.total)}</td>
+                            <td className="py-3">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${
+                                o.status === 'Delivered' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' :
+                                o.status === 'Shipped' ? 'bg-sky-500/20 text-sky-600 dark:text-sky-400' :
+                                'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                              }`}>
+                                {o.status}
+                              </span>
+                            </td>
+                            <td className="py-3 text-right">
+                              <button
+                                onClick={() => {
+                                  setSelectedOrderDetails(o);
+                                  setActiveTab('orders');
+                                }}
+                                className="p-1.5 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-lg text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition cursor-pointer"
+                                title="View Order Details"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1485,59 +1615,87 @@ export const AdminDashboardView: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
-                      {filteredOrders.map(order => (
-                        <tr key={order.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/40 transition">
-                          <td className="p-4">
-                            <div className="font-mono text-amber-600 dark:text-amber-400 font-bold">{order.id}</div>
-                            <div className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono">
-                              {new Date(order.createdAt).toLocaleDateString()}
-                            </div>
-                          </td>
-
-                          <td className="p-4">
-                            <div className="font-bold text-neutral-900 dark:text-white">{order.shippingAddress?.fullName}</div>
-                            <div className="text-[11px] text-neutral-500 dark:text-neutral-400">{order.shippingAddress?.email}</div>
-                          </td>
-
-                          <td className="p-4 text-neutral-600 dark:text-neutral-300">
-                            {order.items?.map((item: any) => (
-                              <div key={item.productId + item.size} className="text-[11px]">
-                                • {item.name} ({item.size}) x{item.quantity}
-                              </div>
-                            ))}
-                          </td>
-
-                          <td className="p-4 font-mono font-bold text-neutral-900 dark:text-white">
-                            {formatPrice(order.total)}
-                          </td>
-
-                          <td className="p-4 space-y-1">
-                            <select
-                              value={order.status}
-                              onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value as any)}
-                              className="px-2.5 py-1 bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-700 rounded-lg text-[11px] font-mono font-bold text-amber-600 dark:text-amber-400 focus:outline-none"
-                            >
-                              <option value="Processing">Processing</option>
-                              <option value="Confirmed">Confirmed</option>
-                              <option value="Shipped">Shipped</option>
-                              <option value="Out for Delivery">Out for Delivery</option>
-                              <option value="Delivered">Delivered</option>
-                            </select>
-                            <div className="text-[9px] font-mono text-neutral-400 dark:text-neutral-500">
-                              {order.trackingNumber}
-                            </div>
-                          </td>
-
-                          <td className="p-4 text-right">
-                            <button
-                              onClick={() => setSelectedOrderDetails(order)}
-                              className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs font-mono text-neutral-700 dark:text-neutral-200 rounded-lg transition cursor-pointer border border-neutral-200 dark:border-neutral-700"
-                            >
-                              Details
-                            </button>
+                      {filteredOrders.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-neutral-400 font-mono text-xs">
+                            No orders found in Supabase public.orders table matching this filter.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        filteredOrders.map(order => (
+                          <tr key={order.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/40 transition">
+                            <td className="p-4">
+                              <div className="font-mono text-amber-600 dark:text-amber-400 font-bold">{order.id}</div>
+                              <div className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono">
+                                {new Date(order.createdAt).toLocaleDateString()}
+                              </div>
+                            </td>
+
+                            <td className="p-4">
+                              <div className="font-bold text-neutral-900 dark:text-white">{order.shippingAddress?.fullName}</div>
+                              <div className="text-[11px] text-neutral-500 dark:text-neutral-400">{order.shippingAddress?.email}</div>
+                            </td>
+
+                            <td className="p-4 text-neutral-600 dark:text-neutral-300">
+                              {order.items?.map((item: any) => (
+                                <div key={item.productId + item.size} className="text-[11px]">
+                                  • {item.name} ({item.size}) x{item.quantity}
+                                </div>
+                              ))}
+                            </td>
+
+                            <td className="p-4 font-mono font-bold text-neutral-900 dark:text-white">
+                              {formatPrice(order.total)}
+                            </td>
+
+                            <td className="p-4 space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={order.status}
+                                  onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value as any, order.trackingNumber, order.paymentStatus)}
+                                  className="px-2.5 py-1 bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-700 rounded-lg text-[11px] font-mono font-bold text-amber-600 dark:text-amber-400 focus:outline-none"
+                                >
+                                  <option value="Processing">Processing</option>
+                                  <option value="Confirmed">Confirmed</option>
+                                  <option value="Shipped">Shipped</option>
+                                  <option value="Out for Delivery">Out for Delivery</option>
+                                  <option value="Delivered">Delivered</option>
+                                  <option value="Cancelled">Cancelled</option>
+                                </select>
+
+                                <span className={`px-2 py-0.5 text-[9px] font-mono font-bold uppercase rounded ${
+                                  order.paymentStatus === 'paid' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                }`}>
+                                  {order.paymentStatus || 'Paid'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="text"
+                                  defaultValue={order.trackingNumber || ''}
+                                  placeholder="Add Tracking #"
+                                  onBlur={(e) => {
+                                    if (e.target.value !== (order.trackingNumber || '')) {
+                                      handleUpdateOrderStatus(order.id, order.status, e.target.value, order.paymentStatus);
+                                    }
+                                  }}
+                                  className="px-2 py-0.5 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded font-mono text-[10px] text-neutral-800 dark:text-neutral-200 w-36 focus:outline-none focus:border-amber-500"
+                                />
+                              </div>
+                            </td>
+
+                            <td className="p-4 text-right">
+                              <button
+                                onClick={() => setSelectedOrderDetails(order)}
+                                className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs font-mono text-neutral-700 dark:text-neutral-200 rounded-lg transition cursor-pointer border border-neutral-200 dark:border-neutral-700"
+                              >
+                                Details
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1653,48 +1811,88 @@ export const AdminDashboardView: React.FC = () => {
                   <table className="w-full text-left text-xs">
                     <thead className="bg-neutral-50 dark:bg-neutral-950 text-[10px] font-mono text-neutral-500 dark:text-neutral-400 uppercase border-b border-neutral-200 dark:border-neutral-800">
                       <tr>
-                        <th className="p-4">Item Name</th>
-                        <th className="p-4">Sizes Available</th>
+                        <th className="p-4">Garment Item</th>
                         <th className="p-4">Category</th>
-                        <th className="p-4">Status</th>
-                        <th className="p-4 text-right">Quick Toggle</th>
+                        <th className="p-4">Sizes</th>
+                        <th className="p-4 text-center">Stock Quantity</th>
+                        <th className="p-4">Stock Status</th>
+                        <th className="p-4 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
-                      {products.map(p => (
-                        <tr key={p.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/40 transition">
-                          <td className="p-4 font-bold text-neutral-900 dark:text-white uppercase">{p.name}</td>
-                          <td className="p-4 font-mono text-[10px] text-neutral-500 dark:text-neutral-400">
-                            {p.sizes?.join(', ') || 'S, M, L, XL'}
-                          </td>
-                          <td className="p-4 text-neutral-500 dark:text-neutral-400">{p.category}</td>
-                          <td className="p-4">
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${
-                              p.inStock ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400' : 'bg-rose-500/10 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400'
-                            }`}>
-                              {p.inStock ? 'IN STOCK' : 'OUT OF STOCK'}
-                            </span>
-                          </td>
-                          <td className="p-4 text-right">
-                            <button
-                              onClick={async () => {
-                                await fetch(`/api/admin/products/${p.id}`, {
-                                  method: 'PUT',
-                                  headers: {
-                                    'Content-Type': 'application/json',
-                                    Authorization: `Bearer ${token}`
-                                  },
-                                  body: JSON.stringify({ inStock: !p.inStock })
-                                });
-                                fetchDashboardData();
-                              }}
-                              className="px-3 py-1 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs font-mono font-bold text-neutral-700 dark:text-neutral-200 rounded-lg transition cursor-pointer border border-neutral-200 dark:border-neutral-700"
-                            >
-                              Toggle Stock
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {products.map(p => {
+                        const stockQty = p.stockQuantity ?? (p.inStock ? 25 : 0);
+                        const isLowStock = stockQty < 10 && stockQty > 0;
+                        return (
+                          <tr key={p.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/40 transition">
+                            <td className="p-4 flex items-center gap-3">
+                              <img
+                                src={p.images?.[0] || (p as any).image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80'}
+                                alt={p.name}
+                                className="w-10 h-12 object-cover rounded-lg bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 flex-shrink-0"
+                              />
+                              <div>
+                                <div className="font-bold text-neutral-900 dark:text-white uppercase text-xs">{p.name}</div>
+                                <div className="font-mono text-[10px] text-amber-600 dark:text-amber-500">{p.id}</div>
+                              </div>
+                            </td>
+
+                            <td className="p-4 text-neutral-600 dark:text-neutral-300">{p.category}</td>
+
+                            <td className="p-4 font-mono text-[10px] text-neutral-500 dark:text-neutral-400">
+                              {p.sizes?.join(', ') || 'S, M, L, XL'}
+                            </td>
+
+                            <td className="p-4 text-center">
+                              <div className="inline-flex items-center gap-1.5 bg-neutral-100 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-1 rounded-xl">
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickUpdateStock(p.id, Math.max(0, stockQty - 1))}
+                                  className="w-6 h-6 rounded-lg bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 font-bold hover:bg-neutral-200 dark:hover:bg-neutral-800 flex items-center justify-center cursor-pointer border border-neutral-200 dark:border-neutral-700"
+                                  title="Decrease Stock"
+                                >
+                                  -
+                                </button>
+                                <span className="w-10 text-center font-mono font-bold text-neutral-900 dark:text-white text-xs">
+                                  {stockQty}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickUpdateStock(p.id, stockQty + 1)}
+                                  className="w-6 h-6 rounded-lg bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 font-bold hover:bg-neutral-200 dark:hover:bg-neutral-800 flex items-center justify-center cursor-pointer border border-neutral-200 dark:border-neutral-700"
+                                  title="Increase Stock"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </td>
+
+                            <td className="p-4">
+                              <div className="flex flex-col gap-1 items-start">
+                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase ${
+                                  stockQty > 0 && p.inStock ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-500/30'
+                                }`}>
+                                  {stockQty > 0 && p.inStock ? 'IN STOCK' : 'OUT OF STOCK'}
+                                </span>
+                                {isLowStock && (
+                                  <span className="px-2 py-0.5 bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[9px] font-mono font-bold rounded uppercase border border-amber-500/30">
+                                    Low Stock ({stockQty} left)
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="p-4 text-right space-x-2">
+                              <button
+                                onClick={() => handleQuickUpdateStock(p.id, stockQty > 0 ? 0 : 25)}
+                                className="px-3 py-1 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-xs font-mono font-bold text-neutral-700 dark:text-neutral-200 rounded-lg transition cursor-pointer border border-neutral-200 dark:border-neutral-700"
+                              >
+                                {stockQty > 0 ? 'Set Zero' : 'Restock 25'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1858,7 +2056,7 @@ export const AdminDashboardView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div>
                   <label className="block font-mono text-[10px] uppercase text-neutral-500 dark:text-neutral-400 mb-1">
                     Price (₹) *
@@ -1897,11 +2095,26 @@ export const AdminDashboardView: React.FC = () => {
                     className="w-full px-3.5 py-2.5 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl text-neutral-900 dark:text-white font-mono focus:outline-none"
                   />
                 </div>
+
+                <div>
+                  <label className="block font-mono text-[10px] uppercase text-amber-600 dark:text-amber-400 font-bold mb-1">
+                    Stock Quantity *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    value={prodStockQuantity}
+                    onChange={(e) => setProdStockQuantity(e.target.value)}
+                    placeholder="25"
+                    className="w-full px-3.5 py-2.5 bg-neutral-50 dark:bg-neutral-950 border border-amber-500/50 rounded-xl text-neutral-900 dark:text-white font-mono font-bold focus:outline-none"
+                  />
+                </div>
               </div>
 
               <div>
                 <label className="block font-mono text-[10px] uppercase text-neutral-500 dark:text-neutral-400 mb-1.5 flex items-center justify-between">
-                  <span>Garment Image (Upload to Supabase Storage) *</span>
+                  <span>Garment Image (Upload directly to Supabase Storage) *</span>
                   <span className="text-amber-500 font-bold">Bucket: product-images</span>
                 </label>
 
@@ -2101,9 +2314,27 @@ export const AdminDashboardView: React.FC = () => {
                 <p className="text-neutral-600 dark:text-neutral-400">{selectedOrderDetails.shippingAddress?.address}, {selectedOrderDetails.shippingAddress?.city}, {selectedOrderDetails.shippingAddress?.state} {selectedOrderDetails.shippingAddress?.zipCode}</p>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl space-y-1">
+                  <span className="text-[10px] font-mono text-neutral-500 uppercase block">Payment Status</span>
+                  <span className={`inline-block px-2 py-0.5 text-[10px] font-mono font-bold uppercase rounded ${
+                    selectedOrderDetails.paymentStatus === 'paid' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                  }`}>
+                    {selectedOrderDetails.paymentStatus || 'Paid'}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl space-y-1">
+                  <span className="text-[10px] font-mono text-neutral-500 uppercase block">Tracking Number</span>
+                  <span className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400 block">
+                    {selectedOrderDetails.trackingNumber || 'Unassigned'}
+                  </span>
+                </div>
+              </div>
+
               <div>
                 <span className="text-[10px] font-mono text-neutral-500 uppercase block mb-1">Purchased Garments</span>
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-48 overflow-y-auto">
                   {selectedOrderDetails.items?.map((item: any, idx: number) => (
                     <div key={idx} className="flex items-center justify-between p-2.5 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl">
                       <div>

@@ -4,6 +4,7 @@ import { useCart } from '../../context/CartContext';
 import { useNavigation } from '../../context/NavigationContext';
 import { Order } from '../../types';
 import { formatPrice } from '../../lib/currency';
+import { fetchOrdersFromSupabase } from '../../lib/supabase';
 import { User, Package, Heart, MapPin, LogOut, Shield, ChevronRight, ShoppingBag, Calendar, Database, Sparkles, Trash2, RefreshCw } from 'lucide-react';
 import { GoogleIcon } from '../common/AuthModal';
 
@@ -22,17 +23,10 @@ export const AccountView: React.FC = () => {
     const fetchUserOrders = async () => {
       setIsLoadingOrders(true);
       try {
-        const headers: Record<string, string> = {};
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-        const res = await fetch(`/api/orders?userId=${user.id}`, { headers });
-        const data = await res.json();
-        
-        if (Array.isArray(data)) {
-          setOrders(data);
-        } else if (data && Array.isArray(data.orders)) {
-          setOrders(data.orders);
+        const res = await fetchOrdersFromSupabase();
+        if (res.success && Array.isArray(res.data)) {
+          const userOrders = res.data.filter((o: Order) => String(o.userId) === String(user.id));
+          setOrders(userOrders);
         } else {
           setOrders([]);
         }

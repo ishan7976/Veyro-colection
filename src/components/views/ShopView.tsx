@@ -4,17 +4,21 @@ import { ProductCard } from '../common/ProductCard';
 import { QuickViewModal } from '../common/QuickViewModal';
 import { Product, ProductSize } from '../../types';
 import { formatPrice } from '../../lib/currency';
-import { Filter, SlidersHorizontal, Search, X, Grid2X2, Grid3X3, LayoutGrid, RotateCcw } from 'lucide-react';
+import { fetchProductsFromSupabase, seedProductsToSupabase, SUPABASE_PROJECT_ID, SUPABASE_URL } from '../../lib/supabase';
+import { Filter, SlidersHorizontal, Search, X, Grid2X2, Grid3X3, LayoutGrid, RotateCcw, AlertTriangle, Sparkles, Plus, Copy, Check } from 'lucide-react';
 
 export const ShopView: React.FC = () => {
-  const { filters, setFilters, resetFilters } = useNavigation();
+  const { filters, setFilters, resetFilters, navigateTo } = useNavigation();
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [totalFetchedCount, setTotalFetchedCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [gridColumns, setGridColumns] = useState<2 | 3 | 4>(4);
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [copiedRls, setCopiedRls] = useState(false);
 
   const categories = ['All', 'Oversized T-Shirts', 'Graphic T-Shirts', 'Hoodies', 'Limited Edition Drops'];
   const allSizes: ProductSize[] = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
@@ -23,27 +27,108 @@ export const ShopView: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const queryParams = new URLSearchParams();
-      if (filters.category && filters.category !== 'All') queryParams.set('category', filters.category);
-      if (filters.searchQuery) queryParams.set('search', filters.searchQuery);
-      if (filters.minPrice > 0) queryParams.set('minPrice', filters.minPrice.toString());
-      if (filters.maxPrice < 25000) queryParams.set('maxPrice', filters.maxPrice.toString());
-      if (filters.sizes.length > 0) queryParams.set('sizes', filters.sizes.join(','));
-      if (filters.sortBy) queryParams.set('sortBy', filters.sortBy);
-      if (filters.limitedDropsOnly) queryParams.set('limitedOnly', 'true');
+      console.log(`[ShopView] Fetching products from Supabase project: ${SUPABASE_PROJECT_ID} (${SUPABASE_URL})`);
+      
+      const supaRes = await fetchProductsFromSupabase();
 
-      const res = await fetch(`/api/products?${queryParams.toString()}`);
-      if (!res.ok) {
-        throw new Error(`HTTP error ${res.status}: Failed to fetch products from Supabase`);
+      // Diagnostic console logs
+      console.log('[ShopView] Successfully loaded products count:', supaRes.data ? supaRes.data.length : 0);
+      if (supaRes.error) {
+        console.warn('[ShopView] Supabase notice:', supaRes.error);
       }
-      const data = await res.json();
-      setProducts(data.products || []);
+
+      if (!supaRes.success && supaRes.error) {
+        setError(supaRes.error);
+        setProducts([]);
+        setTotalFetchedCount(0);
+        return;
+      }
+
+      const allFetched = supaRes.data || [];
+      setTotalFetchedCount(allFetched.length);
+
+      // 4. Clean filter application without accidental filtering of stock/quantity
+      let list = [...allFetched];
+
+      // Filter by Category
+      if (filters.category && filters.category !== 'All') {
+        const targetCat = filters.category.toLowerCase().trim();
+        list = list.filter(p => (p.category || '').toLowerCase().trim() === targetCat);
+      }
+
+      // Filter by Search Query
+      if (filters.searchQuery && filters.searchQuery.trim() !== '') {
+        const q = filters.searchQuery.toLowerCase().trim();
+        list = list.filter(p =>
+          (p.name || '').toLowerCase().includes(q) ||
+          (p.description || '').toLowerCase().includes(q) ||
+          (p.category || '').toLowerCase().includes(q) ||
+          (Array.isArray(p.tags) && p.tags.some((t: string) => (t || '').toLowerCase().includes(q)))
+        );
+      }
+
+      // Filter by Price Range
+      if (filters.minPrice > 0) {
+        list = list.filter(p => p.price >= filters.minPrice);
+      }
+      if (filters.maxPrice < 25000) {
+        list = list.filter(p => p.price <= filters.maxPrice);
+      }
+
+      // Filter by Sizes
+      if (filters.sizes && filters.sizes.length > 0) {
+        list = list.filter(p => 
+          Array.isArray(p.sizes) && p.sizes.some((s: string) => filters.sizes.includes(s as ProductSize))
+        );
+      }
+
+      // Filter by Limited Drops
+      if (filters.limitedDropsOnly) {
+        list = list.filter(p => Boolean(p.isLimitedDrop));
+      }
+
+      // Sorting
+      if (filters.sortBy === 'price-asc') {
+        list.sort((a, b) => a.price - b.price);
+      } else if (filters.sortBy === 'price-desc') {
+        list.sort((a, b) => b.price - a.price);
+      } else if (filters.sortBy === 'rating') {
+        list.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      } else if (filters.sortBy === 'newest') {
+        list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      }
+
+      setProducts(list);
     } catch (err: any) {
-      console.error('Failed to fetch shop products from Supabase:', err);
-      setError(err?.message || 'Failed to load products from Supabase database.');
+      console.error('[ShopView] Error in fetchFilteredProducts:', err);
+      setError(err?.message || 'Failed to communicate with Supabase database.');
+      setProducts([]);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSeedProducts = async () => {
+    setIsSeeding(true);
+    try {
+      const res = await seedProductsToSupabase();
+      if (res.success) {
+        await fetchFilteredProducts();
+      } else {
+        setError(res.error || 'Failed to seed products');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Seed exception');
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  const copyRlsSql = () => {
+    const sql = `ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;\nDROP POLICY IF EXISTS "Public read products" ON public.products;\nCREATE POLICY "Public read products" ON public.products FOR SELECT USING (true);`;
+    navigator.clipboard.writeText(sql);
+    setCopiedRls(true);
+    setTimeout(() => setCopiedRls(false), 2500);
   };
 
   useEffect(() => {
@@ -274,30 +359,106 @@ export const ShopView: React.FC = () => {
           {/* Grid Cards */}
           {isLoading ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-6">
-              {[1, 2, 3, 4, 5, 6].map((n) => (
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
                 <div key={n} className="aspect-[3/4] bg-neutral-200 dark:bg-neutral-800 animate-pulse rounded-none" />
               ))}
             </div>
           ) : error ? (
-            <div className="py-20 text-center space-y-4 bg-white dark:bg-neutral-900 rounded-2xl border border-rose-500/30 p-8">
-              <RotateCcw className="w-12 h-12 text-rose-500 mx-auto" />
-              <h3 className="text-lg font-black text-neutral-900 dark:text-white uppercase">Supabase Connection Error</h3>
-              <p className="text-xs text-rose-500 max-w-sm mx-auto font-mono">
-                {error}
-              </p>
-              <button
-                onClick={fetchFilteredProducts}
-                className="px-6 py-2.5 bg-rose-600 text-white font-bold text-xs uppercase tracking-wider rounded-xl hover:bg-rose-700 transition"
-              >
-                Retry Supabase Query
-              </button>
+            <div className="py-12 text-center space-y-4 bg-white dark:bg-neutral-900 rounded-2xl border border-rose-500/30 p-6 sm:p-10 shadow-lg">
+              <div className="w-14 h-14 bg-rose-50 dark:bg-rose-950/40 rounded-full flex items-center justify-center mx-auto text-rose-500 border border-rose-500/20">
+                <AlertTriangle className="w-7 h-7" />
+              </div>
+              <div>
+                <span className="text-[10px] font-mono font-black uppercase tracking-widest text-rose-500">
+                  Supabase Query Notice ({SUPABASE_PROJECT_ID})
+                </span>
+                <h3 className="text-lg sm:text-xl font-black text-neutral-900 dark:text-white uppercase mt-1">
+                  Product Fetch Issue
+                </h3>
+              </div>
+              <div className="p-4 bg-rose-50 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-900/40 text-left max-w-xl mx-auto">
+                <p className="text-xs font-mono text-rose-700 dark:text-rose-300 break-words whitespace-pre-wrap">
+                  {error}
+                </p>
+              </div>
+              
+              {/* RLS Helper Box */}
+              <div className="max-w-xl mx-auto p-4 bg-neutral-100 dark:bg-neutral-800/80 rounded-xl border border-neutral-200 dark:border-neutral-700 text-left space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono font-bold text-neutral-700 dark:text-neutral-300">
+                    Fix RLS SELECT Policy on public.products:
+                  </span>
+                  <button
+                    onClick={copyRlsSql}
+                    className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white rounded border border-neutral-300 dark:border-neutral-600 hover:bg-neutral-50"
+                  >
+                    {copiedRls ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedRls ? 'Copied SQL' : 'Copy SQL'}</span>
+                  </button>
+                </div>
+                <pre className="text-[10px] font-mono bg-neutral-900 text-emerald-400 p-2.5 rounded overflow-x-auto">
+{`CREATE POLICY "Public read products" ON public.products FOR SELECT USING (true);`}
+                </pre>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={fetchFilteredProducts}
+                  className="px-6 py-2.5 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-bold text-xs uppercase tracking-wider rounded-xl hover:opacity-90 transition flex items-center gap-2"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Retry Fetch</span>
+                </button>
+                <button
+                  onClick={() => navigateTo('admin', { adminSubRoute: 'products' })}
+                  className="px-6 py-2.5 bg-amber-500 text-black font-bold text-xs uppercase tracking-wider rounded-xl hover:bg-amber-400 transition flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Open Admin Portal</span>
+                </button>
+              </div>
+            </div>
+          ) : totalFetchedCount === 0 ? (
+            <div className="py-14 text-center space-y-5 bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-8 max-w-xl mx-auto shadow-sm">
+              <div className="w-14 h-14 bg-amber-50 dark:bg-amber-950/40 rounded-full flex items-center justify-center mx-auto text-amber-500 border border-amber-500/20">
+                <Sparkles className="w-7 h-7" />
+              </div>
+              <div>
+                <span className="text-[10px] font-mono font-black uppercase tracking-widest text-amber-500">
+                  Supabase Project Connected ({SUPABASE_PROJECT_ID})
+                </span>
+                <h3 className="text-xl font-black text-neutral-900 dark:text-white uppercase mt-1">
+                  0 Products in Supabase Database
+                </h3>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2 max-w-md mx-auto">
+                  The <code className="text-amber-500 font-bold">public.products</code> table exists in your Supabase project but currently contains 0 records. Seed initial streetwear garments or upload products in the Admin Portal.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={handleSeedProducts}
+                  disabled={isSeeding}
+                  className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs uppercase tracking-wider rounded-xl transition shadow-md flex items-center gap-2"
+                >
+                  {isSeeding ? <RotateCcw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  <span>{isSeeding ? 'Seeding Products...' : 'Seed Streetwear Catalog'}</span>
+                </button>
+                <button
+                  onClick={() => navigateTo('admin', { adminSubRoute: 'products' })}
+                  className="px-6 py-2.5 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-bold text-xs uppercase tracking-wider rounded-xl hover:opacity-90 transition flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Upload Product</span>
+                </button>
+              </div>
             </div>
           ) : products.length === 0 ? (
             <div className="py-20 text-center space-y-4 bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-8">
               <Filter className="w-12 h-12 text-neutral-400 mx-auto" />
               <h3 className="text-lg font-black text-neutral-900 dark:text-white uppercase">No items match your filter</h3>
               <p className="text-xs text-neutral-500 max-w-sm mx-auto">
-                Try loosening your price limits or removing size selections to see available VEYRO drops.
+                {totalFetchedCount} total products are available in Supabase. Try loosening your price limits, clearing category filter, or removing size selections.
               </p>
               <button
                 onClick={resetFilters}

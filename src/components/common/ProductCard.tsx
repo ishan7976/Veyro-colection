@@ -19,7 +19,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView }
 
   const inWishlist = isInWishlist(product.id);
   const DEFAULT_IMG = 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80';
-  const secondaryImage = product.images?.[1] || product.images?.[0] || DEFAULT_IMG;
+  const primaryImage = product.image_url || product.images?.[0] || DEFAULT_IMG;
+  const secondaryImage = product.images?.[1] || primaryImage;
 
   const handleQuickAdd = (e: React.MouseEvent, size: ProductSize) => {
     e.stopPropagation();
@@ -40,7 +41,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onQuickView }
       {/* Image Container */}
       <div className="relative aspect-square sm:aspect-[3/4] h-[160px] xs:h-[175px] sm:h-auto w-full overflow-hidden bg-neutral-100 dark:bg-zinc-950 shrink-0">
         <img
-          src={isHovered ? secondaryImage : (product.images?.[0] || DEFAULT_IMG)}
+          src={isHovered ? secondaryImage : primaryImage}
           alt={product.name}
           className="w-full h-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-105 opacity-95 dark:opacity-90 group-hover:opacity-100"
           referrerPolicy="no-referrer"

@@ -6,6 +6,7 @@ import { SizeGuideModal } from '../common/SizeGuideModal';
 import { ProductCard } from '../common/ProductCard';
 import { useToast } from '../../context/ToastContext';
 import { formatPrice } from '../../lib/currency';
+import { supabase, mapSupabaseProductToProduct, fetchProductsFromSupabase } from '../../lib/supabase';
 import {
   Star,
   ShoppingBag,
@@ -55,34 +56,58 @@ export const ProductDetailView: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/products/${selectedProductId}`);
-      if (!res.ok) throw new Error(`Product not found in Supabase (${res.status})`);
-      const data: Product = await res.json();
+      let data: Product | null = null;
+
+      // Directly query Supabase products
+      console.log('[ProductDetailView] Fetching product directly from Supabase for ID or slug:', selectedProductId);
+      const allRes = await fetchProductsFromSupabase();
+      if (allRes.success && allRes.data) {
+        const match = allRes.data.find(p => String(p.id) === String(selectedProductId) || p.slug === selectedProductId);
+        if (match) {
+          data = match;
+        }
+      }
+
+      if (!data) {
+        const isValidUuid = (val: any) =>
+          typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val);
+
+        if (isValidUuid(selectedProductId)) {
+          const { data: supaRows, error: supaErr } = await supabase
+            .from('products')
+            .select('*')
+            .eq('id', selectedProductId);
+
+          if (supaErr) {
+            console.warn('[ProductDetailView] Supabase direct query notice:', supaErr.message);
+          } else if (supaRows && supaRows.length > 0) {
+            data = mapSupabaseProductToProduct(supaRows[0]);
+          }
+        }
+      }
+
+      if (!data) {
+        throw new Error(`Product with ID "${selectedProductId}" was not found in Supabase.`);
+      }
+
       setProduct(data);
-      setSelectedImage(data.images?.[0] || '');
+      const initialImg = data.image_url || data.images?.[0] || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80';
+      setSelectedImage(initialImg);
       setSelectedSize(data.sizes?.[2] || data.sizes?.[0] || 'M');
       setSelectedColor(data.colors?.[0]?.name || 'Standard');
 
-      // Fetch reviews
+      // Fetch related products from Supabase
       try {
-        const revRes = await fetch(`/api/products/${selectedProductId}/reviews`);
-        const revData = await revRes.json();
-        setReviews(revData || []);
-      } catch {
-        setReviews([]);
-      }
-
-      // Fetch related products
-      try {
-        const relRes = await fetch(`/api/products?category=${encodeURIComponent(data.category)}`);
-        const relData = await relRes.json();
-        setRelatedProducts((relData.products || []).filter((p: Product) => p.id !== data.id).slice(0, 4));
+        const allRes = await fetchProductsFromSupabase();
+        if (allRes.data && allRes.data.length > 0) {
+          setRelatedProducts(allRes.data.filter((p: Product) => p.id !== data?.id).slice(0, 4));
+        }
       } catch {
         setRelatedProducts([]);
       }
     } catch (err: any) {
-      console.error('Failed to load product detail from Supabase:', err);
-      setError(err?.message || 'Error fetching product specifications');
+      console.error('[ProductDetailView] Error:', err);
+      setError(err?.message || 'Error fetching product specifications from Supabase');
     } finally {
       setIsLoading(false);
     }
@@ -326,17 +351,30 @@ export const ProductDetailView: React.FC = () => {
 
           {/* CTAs */}
           <div className="space-y-3 pt-4 border-t border-neutral-200 dark:border-neutral-800">
+            {product.stockQuantity !== undefined && product.stockQuantity < 10 && product.stockQuantity > 0 && (
+              <div className="px-3.5 py-2 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-600 dark:text-amber-400 text-xs font-mono font-bold uppercase flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                <span>Low Stock Warning: Only {product.stockQuantity} pieces remaining in studio</span>
+              </div>
+            )}
+
             <button
               onClick={handleAddToCart}
-              className="font-button w-full py-4 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-medium text-xs uppercase tracking-[0.15em] rounded-2xl hover:bg-black dark:hover:bg-neutral-100 active:scale-[0.98] transition-all shadow-xl flex items-center justify-center gap-2 cursor-pointer"
+              disabled={!product.inStock || (product.stockQuantity !== undefined && product.stockQuantity === 0)}
+              className="font-button w-full py-4 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-medium text-xs uppercase tracking-[0.15em] rounded-2xl hover:bg-black dark:hover:bg-neutral-100 active:scale-[0.98] transition-all shadow-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ShoppingBag className="w-4 h-4" />
-              <span>Add to Bag • ${product.price * quantity}</span>
+              <span>
+                {!product.inStock || (product.stockQuantity !== undefined && product.stockQuantity === 0)
+                  ? 'Currently Out of Stock'
+                  : `Add to Bag • ${formatPrice(product.price * quantity)}`}
+              </span>
             </button>
 
             <button
               onClick={handleBuyNow}
-              className="font-button w-full py-3.5 bg-amber-500 text-black font-medium text-xs uppercase tracking-[0.15em] rounded-2xl hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md cursor-pointer"
+              disabled={!product.inStock || (product.stockQuantity !== undefined && product.stockQuantity === 0)}
+              className="font-button w-full py-3.5 bg-amber-500 text-black font-medium text-xs uppercase tracking-[0.15em] rounded-2xl hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Express Checkout Now
             </button>

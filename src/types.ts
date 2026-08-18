@@ -36,10 +36,12 @@ export interface Product {
   fabricDetails: string;
   gsm: number;
   fit: 'Oversized Boxy Fit' | 'Relaxed Fit' | 'Regular Fit' | 'Cropped Streetwear Fit';
+  image_url?: string;
   images: string[];
   colors: ProductColor[];
   sizes: ProductSize[];
   inStock: boolean;
+  stockQuantity?: number;
   isNewArrival?: boolean;
   isTrending?: boolean;
   isLimitedDrop?: boolean;
@@ -104,8 +106,9 @@ export interface Order {
   shippingFee: number;
   tax: number;
   total: number;
-  status: 'Processing' | 'Shipped' | 'Out for Delivery' | 'Delivered';
+  status: 'Processing' | 'Shipped' | 'Out for Delivery' | 'Delivered' | 'Cancelled';
   paymentMethod: 'card' | 'apple_pay' | 'google_pay' | 'cod';
+  paymentStatus?: 'Paid' | 'Pending' | 'Failed' | 'Refunded';
   trackingNumber: string;
   createdAt: string;
   estimatedDelivery: string;

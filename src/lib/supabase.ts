@@ -3,10 +3,10 @@ import { INITIAL_PRODUCTS } from '../data/products';
 
 // User-provided Supabase project credentials
 export const SUPABASE_PROJECT_ID = 'jjkmtvtdobhiehfzeljr';
-const rawSupabaseUrl = process.env.SUPABASE_URL || `https://${SUPABASE_PROJECT_ID}.supabase.co`;
-export const SUPABASE_URL = rawSupabaseUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
-export const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impqa210dnRkb2JoaWVoZnplbGpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyMDcyNzUsImV4cCI6MjEwMTc4MzI3NX0.K2OBBnJpvg8wL46b_uTv-n9plxb6mA4VKWaVZm0NT8w';
-export const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
+const envUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) || process.env.SUPABASE_URL || `https://${SUPABASE_PROJECT_ID}.supabase.co`;
+export const SUPABASE_URL = envUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+export const SUPABASE_ANON_KEY = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) || process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impqa210dnRkb2JoaWVoZnplbGpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyMDcyNzUsImV4cCI6MjEwMTc4MzI3NX0.K2OBBnJpvg8wL46b_uTv-n9plxb6mA4VKWaVZm0NT8w';
+export const SUPABASE_SERVICE_ROLE_KEY = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_SERVICE_ROLE_KEY) || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
 
 // Initialize Supabase Client (Anon)
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -58,21 +58,32 @@ export interface SupabaseOrder {
 export interface SupabaseProduct {
   id: string;
   name: string;
-  slug: string;
-  price: number;
-  original_price?: number;
-  category: string;
   description: string;
+  price: number;
+  category: string;
+  image_url?: string;
+  stock?: number;
+  stock_quantity?: number;
+  created_at?: string;
+  original_price?: number | null;
+  fabric_gsm?: number;
+  in_stock?: boolean;
+  new_arrival_badge?: boolean;
+  limited_drop_badge?: boolean;
+  // UI & compatibility extensions
+  slug?: string;
   gsm?: number;
   fit?: string;
-  images: string[];
-  sizes: string[];
-  colors: any[];
-  in_stock: boolean;
+  images?: string[];
+  sizes?: string[];
+  colors?: any[];
   is_new_arrival?: boolean;
   is_limited_drop?: boolean;
   is_trending?: boolean;
-  created_at: string;
+  rating?: number;
+  review_count?: number;
+  tags?: string[];
+  drop_number?: string;
 }
 
 export interface SupabaseProfile {
@@ -92,13 +103,30 @@ export const fetchProfileFromSupabase = async (
   extraMetadata?: { fullName?: string; avatarUrl?: string }
 ): Promise<{ profile: SupabaseProfile | null; role: string }> => {
   const cleanEmail = (userEmail || '').trim().toLowerCase();
+  const isAdminEmail = cleanEmail === 'ishansharma3305@gmail.com' || cleanEmail === 'admin@veyro.com';
 
   try {
     let profileData: SupabaseProfile | null = null;
     let queryError: any = null;
+    const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
 
-    // 1. Primary Query: Query profiles table by email (case-insensitive)
-    if (cleanEmail) {
+    // 1. Primary Query: If userId is a valid UUID (from auth.users.id), query by primary key 'id'
+    if (isValidUuid) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (data) {
+        profileData = data;
+      } else if (error) {
+        console.warn('[Supabase Auth Debug] Profile ID query note:', error.message);
+      }
+    }
+
+    // 2. Secondary Query: If not found by id, query profiles table by email (case-insensitive)
+    if (!profileData && cleanEmail) {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -110,32 +138,12 @@ export const fetchProfileFromSupabase = async (
       }
       if (error) {
         queryError = error;
-        console.warn('[Supabase Auth Debug] Profile email query warning:', error.message);
-      }
-    }
-
-    // 2. Secondary Query: If not found by email and userId is a valid UUID, try by id
-    const isValidUuid = userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
-    if (!profileData && isValidUuid) {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (data) {
-        profileData = data;
-      }
-      if (error) {
-        console.warn('[Supabase Auth Debug] Profile ID query warning:', error.message);
+        console.warn('[Supabase Auth Debug] Profile email query note:', error.message);
       }
     }
 
     // Determine role value from Supabase profiles table
     let roleValue = profileData?.role;
-
-    // Admin email override
-    const isAdminEmail = cleanEmail === 'ishansharma3305@gmail.com' || cleanEmail === 'admin@veyro.com';
 
     // If profile exists in Supabase profiles table, preserve role and update missing avatar_url/full_name if provided
     if (profileData) {
@@ -143,60 +151,114 @@ export const fetchProfileFromSupabase = async (
         roleValue = 'admin';
       }
       // Non-destructive update for Google metadata if missing
-      let needsUpdate = false;
-      const updatePayload: Record<string, any> = {};
-      if (extraMetadata?.fullName && !profileData.full_name) {
-        updatePayload.full_name = extraMetadata.fullName;
-        needsUpdate = true;
-      }
-      if (extraMetadata?.avatarUrl && !profileData.avatar_url) {
-        updatePayload.avatar_url = extraMetadata.avatarUrl;
-        needsUpdate = true;
-      }
-      if (needsUpdate && profileData.id) {
-        const { data: updated } = await supabase
-          .from('profiles')
-          .update(updatePayload)
-          .eq('id', profileData.id)
-          .select()
-          .maybeSingle();
+      const resolvedName = extraMetadata?.fullName;
+      const avatar = extraMetadata?.avatarUrl;
 
-        if (updated) profileData = updated;
+      if (profileData.id && (resolvedName || avatar)) {
+        const updateCandidates: Record<string, any>[] = [];
+        
+        // Check if full_name or name needs updating
+        if (resolvedName && !profileData.full_name && !profileData.name) {
+          if (avatar && !profileData.avatar_url) {
+            updateCandidates.push({ full_name: resolvedName, avatar_url: avatar });
+            updateCandidates.push({ name: resolvedName, avatar_url: avatar });
+          }
+          updateCandidates.push({ full_name: resolvedName });
+          updateCandidates.push({ name: resolvedName });
+        } else if (avatar && !profileData.avatar_url) {
+          updateCandidates.push({ avatar_url: avatar });
+        }
+
+        for (const candidate of updateCandidates) {
+          try {
+            const { data: updated, error: updateErr } = await supabase
+              .from('profiles')
+              .update(candidate)
+              .eq('id', profileData.id)
+              .select()
+              .maybeSingle();
+
+            if (!updateErr && updated) {
+              profileData = updated;
+              break;
+            }
+          } catch (e) {
+            // Ignore minor update issues
+            break;
+          }
+        }
       }
-    } else if (!queryError && cleanEmail) {
+    } else if (!queryError && cleanEmail && isValidUuid) {
       // If profile genuinely doesn't exist in Supabase and query succeeded, auto-create profile
       const defaultRole = isAdminEmail ? 'admin' : 'user';
       const resolvedName = extraMetadata?.fullName || userEmail.split('@')[0];
+      const avatarUrl = extraMetadata?.avatarUrl || null;
 
-      if (!isValidUuid) {
-        console.warn('[Supabase Auth Debug] Skipping profile insertion: userId is not a valid UUID:', userId);
-      } else {
-        const newProfile = {
-          id: userId, // Real UUID from Supabase Auth data.user.id
+      const dbClient = supabaseAdmin || supabase;
+
+      // Candidate payloads for different common Supabase profile table schemas
+      // Note: We MUST NEVER mix 'name' and 'full_name' in the same payload, or PostgREST throws PGRST204
+      const candidatePayloads = [
+        // Schema 1: Standard Supabase (id, email, full_name, avatar_url, role, created_at)
+        { id: userId, email: cleanEmail, full_name: resolvedName, avatar_url: avatarUrl, role: defaultRole, created_at: new Date().toISOString() },
+        // Schema 2: Standard Supabase without created_at (if DB defaults to now())
+        { id: userId, email: cleanEmail, full_name: resolvedName, avatar_url: avatarUrl, role: defaultRole },
+        // Schema 3: Without role column
+        { id: userId, email: cleanEmail, full_name: resolvedName, avatar_url: avatarUrl },
+        // Schema 4: Schema using 'name' column instead of 'full_name'
+        { id: userId, email: cleanEmail, name: resolvedName, avatar_url: avatarUrl, role: defaultRole },
+        { id: userId, email: cleanEmail, name: resolvedName, avatar_url: avatarUrl },
+        // Schema 5: Minimal profile
+        { id: userId, email: cleanEmail, full_name: resolvedName },
+        { id: userId, email: cleanEmail, name: resolvedName },
+        { id: userId, full_name: resolvedName, avatar_url: avatarUrl }
+      ];
+
+      let insertedSuccessfully = false;
+
+      for (const payload of candidatePayloads) {
+        try {
+          const { data: insertedData, error: insertError } = await dbClient
+            .from('profiles')
+            .upsert([payload], { onConflict: 'id' })
+            .select()
+            .maybeSingle();
+
+          if (!insertError && insertedData) {
+            profileData = insertedData;
+            roleValue = insertedData.role;
+            insertedSuccessfully = true;
+            console.log('[Supabase Auth Debug] Profile successfully upserted in Supabase:', insertedData);
+            break;
+          } else if (insertError) {
+            // Check if error is PGRST204 (column not found) or similar schema mismatch
+            const isColumnNotFound = insertError.code === 'PGRST204' || insertError.code === '42703' || insertError.message?.toLowerCase().includes('column');
+            if (isColumnNotFound) {
+              // Try next candidate payload
+              continue;
+            } else {
+              console.warn('[Supabase Auth Debug] Profile insert notice:', insertError.message);
+              break;
+            }
+          }
+        } catch (err: any) {
+          console.warn('[Supabase Auth Debug] Insert candidate exception:', err?.message);
+          continue;
+        }
+      }
+
+      if (!insertedSuccessfully) {
+        // Fallback local memory representation
+        profileData = {
+          id: userId,
           email: cleanEmail,
           full_name: resolvedName,
           name: resolvedName,
-          avatar_url: extraMetadata?.avatarUrl || null,
+          avatar_url: avatarUrl || undefined,
           role: defaultRole,
           created_at: new Date().toISOString()
         };
-
-        const dbClient = supabaseAdmin || supabase;
-        const { data: insertedData, error: insertError } = await dbClient
-          .from('profiles')
-          .upsert([newProfile], { onConflict: 'id' })
-          .select()
-          .maybeSingle();
-
-        if (!insertError && insertedData) {
-          profileData = insertedData;
-          roleValue = insertedData.role;
-          console.log('[Supabase Auth Debug] Profile upserted in Supabase:', insertedData);
-        } else {
-          console.warn('[Supabase Auth Debug] Profile insert error:', insertError?.message);
-          profileData = newProfile as any;
-          roleValue = defaultRole;
-        }
+        roleValue = defaultRole;
       }
     } else {
       // Fallback if query error occurred or no email
@@ -294,6 +356,53 @@ export const fetchAppointmentsFromSupabase = async (userId?: string) => {
   }
 };
 
+export const fetchCustomersFromSupabase = async (): Promise<{ success: boolean; data: any[]; error?: string }> => {
+  try {
+    const { data: profiles, error: profileErr } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    const { data: orders } = await supabase
+      .from('orders')
+      .select('*');
+
+    if (profileErr) {
+      console.warn('[Supabase Customers] Fetch profile error:', profileErr.message);
+    }
+
+    const orderList = orders || [];
+    const customerList = (profiles || []).map((p: any) => {
+      const email = (p.email || '').toLowerCase().trim();
+      const pId = p.id;
+      const userOrders = orderList.filter((o: any) => {
+        const oUserId = o.user_id || o.userId;
+        const oEmail = (o.shipping_address?.email || o.shippingAddress?.email || '').toLowerCase().trim();
+        return (pId && oUserId === pId) || (email && oEmail === email);
+      });
+
+      const totalSpent = userOrders.reduce((sum: number, o: any) => sum + (Number(o.total) || 0), 0);
+      const lastOrder = userOrders.sort((a: any, b: any) => new Date(b.created_at || b.createdAt).getTime() - new Date(a.created_at || a.createdAt).getTime())[0];
+
+      return {
+        id: p.id,
+        email: p.email,
+        name: p.full_name || p.name || p.email?.split('@')[0] || 'Customer',
+        role: p.role || 'customer',
+        createdAt: p.created_at || new Date().toISOString(),
+        orderCount: userOrders.length,
+        totalSpent,
+        lastOrderDate: lastOrder ? (lastOrder.created_at || lastOrder.createdAt) : null
+      };
+    });
+
+    return { success: true, data: customerList };
+  } catch (err: any) {
+    console.error('[Supabase Customers] Exception:', err);
+    return { success: false, data: [], error: err?.message };
+  }
+};
+
 export const fetchOrdersFromSupabase = async (userId?: string): Promise<{ success: boolean; data: any[]; error?: string }> => {
   try {
     console.log('[Supabase Orders] Executing query: supabase.from("orders").select("*")...');
@@ -309,14 +418,86 @@ export const fetchOrdersFromSupabase = async (userId?: string): Promise<{ succes
     const { data, error } = await query;
 
     if (error) {
-      console.warn('[Supabase Orders] Fetch error:', error.message);
+      console.warn('[Supabase Orders] Fetch error from public.orders:', error.message);
       return { success: false, data: [], error: error.message };
     }
 
-    console.log(`[Supabase Orders] Successfully fetched ${data?.length || 0} orders from Supabase orders table.`);
-    return { success: true, data: data || [] };
+    const safeParseNum = (val: any, defaultVal = 0): number => {
+      if (val === undefined || val === null || val === '') return defaultVal;
+      if (typeof val === 'number') return isNaN(val) ? defaultVal : val;
+      const str = String(val).replace(/[^0-9.-]+/g, '');
+      const n = parseFloat(str);
+      return isNaN(n) ? defaultVal : n;
+    };
+
+    const mappedOrders = (data || []).map((o: any) => {
+      let items = o.items ?? o.order_items ?? o.orderItems ?? o.products ?? [];
+      if (typeof items === 'string') {
+        try { items = JSON.parse(items); } catch (e) { items = []; }
+      }
+      if (!Array.isArray(items)) {
+        items = [];
+      }
+
+      let shippingAddress = o.shipping_address ?? o.shippingAddress ?? o.address ?? o.delivery_address ?? {};
+      if (typeof shippingAddress === 'string') {
+        try { shippingAddress = JSON.parse(shippingAddress); } catch (e) { shippingAddress = {}; }
+      }
+
+      const rawTotal = o.total ?? o.total_amount ?? o.totalAmount ?? o.amount ?? o.grand_total ?? o.grandTotal ?? o.final_total;
+      const rawSubtotal = o.subtotal ?? o.sub_total ?? o.subTotal;
+      const subtotal = safeParseNum(rawSubtotal, safeParseNum(rawTotal, 0));
+      const total = safeParseNum(rawTotal, subtotal);
+      const discount = safeParseNum(o.discount ?? o.discount_amount ?? o.discountAmount, 0);
+      const shippingFee = safeParseNum(o.shipping_fee ?? o.shippingFee ?? o.shipping_amount ?? o.shipping, 0);
+      const tax = safeParseNum(o.tax ?? o.tax_amount ?? o.taxAmount ?? o.gst, 0);
+
+      let rawStatus = (o.status ?? o.order_status ?? o.orderStatus ?? 'Processing').toString().trim();
+      if (!rawStatus) rawStatus = 'Processing';
+      const sLower = rawStatus.toLowerCase();
+      let normalizedStatus: string = 'Processing';
+      if (sLower === 'processing' || sLower === 'in_progress' || sLower === 'pending') {
+        normalizedStatus = 'Processing';
+      } else if (sLower === 'confirmed') {
+        normalizedStatus = 'Confirmed';
+      } else if (sLower === 'shipped' || sLower === 'dispatched' || sLower === 'in_transit') {
+        normalizedStatus = 'Shipped';
+      } else if (sLower === 'out for delivery' || sLower === 'out_for_delivery') {
+        normalizedStatus = 'Out for Delivery';
+      } else if (sLower === 'delivered' || sLower === 'completed') {
+        normalizedStatus = 'Delivered';
+      } else if (sLower === 'cancelled' || sLower === 'canceled') {
+        normalizedStatus = 'Cancelled';
+      } else {
+        normalizedStatus = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
+      }
+
+      return {
+        id: String(o.id || `ord_${Date.now()}`),
+        userId: o.user_id ?? o.userId ?? o.customer_id ?? o.customerId,
+        items,
+        shippingAddress: shippingAddress && typeof shippingAddress === 'object' && Object.keys(shippingAddress).length > 0
+          ? shippingAddress
+          : { fullName: 'Customer', email: 'customer@veyro.com' },
+        shippingMethod: o.shipping_method ?? o.shippingMethod ?? 'standard',
+        subtotal,
+        discount,
+        shippingFee,
+        tax,
+        total,
+        status: normalizedStatus,
+        paymentMethod: o.payment_method ?? o.paymentMethod ?? 'card',
+        paymentStatus: o.payment_status ?? o.paymentStatus ?? (normalizedStatus === 'Delivered' ? 'Paid' : 'Pending'),
+        trackingNumber: o.tracking_number ?? o.trackingNumber ?? o.tracking ?? '',
+        createdAt: o.created_at ?? o.createdAt ?? o.inserted_at ?? new Date().toISOString(),
+        estimatedDelivery: o.estimated_delivery ?? o.estimatedDelivery ?? '3-5 Business Days'
+      };
+    });
+
+    console.log(`[Supabase Orders] Successfully fetched ${mappedOrders.length} orders from Supabase public.orders table.`);
+    return { success: true, data: mappedOrders };
   } catch (err: any) {
-    console.error('[Supabase Orders] Exception:', err);
+    console.error('[Supabase Orders] Exception fetching orders:', err);
     return { success: false, data: [], error: err?.message };
   }
 };
@@ -325,6 +506,8 @@ export const fetchOrderStatsFromSupabase = async (): Promise<{
   success: boolean;
   totalOrders: number;
   totalRevenue: number;
+  averageOrderValue: number;
+  processingQueue: number;
   statusBreakdown: Record<string, number>;
   data: any[];
   error?: string;
@@ -332,13 +515,39 @@ export const fetchOrderStatsFromSupabase = async (): Promise<{
   try {
     const { success, data: orders, error } = await fetchOrdersFromSupabase();
     if (!success || error) {
-      return { success: false, totalOrders: 0, totalRevenue: 0, statusBreakdown: {}, data: [], error };
+      return {
+        success: false,
+        totalOrders: 0,
+        totalRevenue: 0,
+        averageOrderValue: 0,
+        processingQueue: 0,
+        statusBreakdown: {},
+        data: [],
+        error: error || 'Failed to fetch orders from Supabase'
+      };
     }
 
-    const totalOrders = orders.length;
-    const totalRevenue = orders.reduce((sum: number, o: any) => sum + (Number(o.total) || 0), 0);
-    const statusBreakdown = orders.reduce((acc: Record<string, number>, o: any) => {
-      const status = o.status || 'Processing';
+    const validOrders = Array.isArray(orders) ? orders : [];
+    const totalOrders = validOrders.length;
+
+    // Requirement: Total Revenue = SUM(actual order total amount)
+    const totalRevenue = validOrders.reduce((sum: number, o: any) => {
+      const amount = Number(o.total) || 0;
+      return sum + amount;
+    }, 0);
+
+    // Requirement: Average Order Value = Total Revenue / Total Orders
+    const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+
+    // Requirement: Processing Queue = COUNT orders where status = 'Processing'
+    const processingQueue = validOrders.filter((o: any) => {
+      const status = typeof o.status === 'string' ? o.status.trim().toLowerCase() : '';
+      return status === 'processing';
+    }).length;
+
+    // Status breakdown map
+    const statusBreakdown = validOrders.reduce((acc: Record<string, number>, o: any) => {
+      const status = (typeof o.status === 'string' && o.status.trim()) ? o.status.trim() : 'Processing';
       acc[status] = (acc[status] || 0) + 1;
       return acc;
     }, {});
@@ -347,14 +556,18 @@ export const fetchOrderStatsFromSupabase = async (): Promise<{
       success: true,
       totalOrders,
       totalRevenue,
+      averageOrderValue,
+      processingQueue,
       statusBreakdown,
-      data: orders
+      data: validOrders
     };
   } catch (err: any) {
     return {
       success: false,
       totalOrders: 0,
       totalRevenue: 0,
+      averageOrderValue: 0,
+      processingQueue: 0,
       statusBreakdown: {},
       data: [],
       error: err?.message
@@ -367,14 +580,18 @@ export const saveOrderToSupabase = async (orderData: any) => {
     const payload = {
       id: orderData.id,
       user_id: orderData.userId || null,
-      items: orderData.items,
-      shipping_address: orderData.shippingAddress,
+      items: typeof orderData.items === 'object' ? orderData.items : [],
+      shipping_address: typeof orderData.shippingAddress === 'object' ? orderData.shippingAddress : {},
       shipping_method: orderData.shippingMethod || 'standard',
       subtotal: orderData.subtotal || 0,
       discount: orderData.discount || 0,
+      shipping_fee: orderData.shippingFee || 0,
+      tax: orderData.tax || 0,
       total: orderData.total || 0,
       status: orderData.status || 'Processing',
       payment_method: orderData.paymentMethod || 'card',
+      payment_status: orderData.paymentStatus || 'Paid',
+      tracking_number: orderData.trackingNumber || '',
       created_at: orderData.createdAt || new Date().toISOString()
     };
 
@@ -397,11 +614,20 @@ export const saveOrderToSupabase = async (orderData: any) => {
   }
 };
 
-export const updateOrderStatusInSupabase = async (orderId: string, status: string) => {
+export const updateOrderStatusInSupabase = async (
+  orderId: string, 
+  status: string, 
+  trackingNumber?: string,
+  paymentStatus?: string
+) => {
   try {
+    const updatePayload: Record<string, any> = { status };
+    if (trackingNumber !== undefined) updatePayload.tracking_number = trackingNumber;
+    if (paymentStatus !== undefined) updatePayload.payment_status = paymentStatus;
+
     const { data, error } = await supabase
       .from('orders')
-      .update({ status })
+      .update(updatePayload)
       .eq('id', orderId)
       .select();
 
@@ -412,6 +638,27 @@ export const updateOrderStatusInSupabase = async (orderId: string, status: strin
     return { success: true, data };
   } catch (err: any) {
     console.log('[Supabase Sync Notice] Order status update exception:', err?.message);
+    return { success: false, error: err?.message };
+  }
+};
+
+export const updateProductStockInSupabase = async (productId: string, stockQuantity: number) => {
+  try {
+    const inStock = stockQuantity > 0;
+    const { data, error } = await supabase
+      .from('products')
+      .update({
+        stock_quantity: stockQuantity,
+        in_stock: inStock
+      })
+      .eq('id', productId)
+      .select();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true, data: data?.[0] };
+  } catch (err: any) {
     return { success: false, error: err?.message };
   }
 };
@@ -429,22 +676,22 @@ export const saveProductToSupabase = async (productData: any) => {
     const category = productData.category;
     const original_price = productData.originalPrice ? Number(productData.originalPrice) : (productData.original_price ? Number(productData.original_price) : null);
     const fabric_gsm = Number(productData.gsm || productData.fabric_gsm || 280);
+    const stock_quantity = productData.stockQuantity !== undefined ? Number(productData.stockQuantity) : (productData.stock_quantity !== undefined ? Number(productData.stock_quantity) : 25);
     const image_url = Array.isArray(productData.images) && productData.images.length > 0 
       ? productData.images[0] 
       : (productData.image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80');
-    const in_stock = productData.inStock !== false && productData.in_stock !== false;
+    const in_stock = stock_quantity > 0 && productData.inStock !== false && productData.in_stock !== false;
     const new_arrival_badge = Boolean(productData.isNewArrival ?? productData.new_arrival_badge);
     const limited_drop_badge = Boolean(productData.isLimitedDrop ?? productData.limited_drop_badge);
     const created_at = productData.createdAt || productData.created_at || new Date().toISOString();
 
-    // Primary payload matching requested column names:
-    // name, category, price, original_price, fabric_gsm, image_url, description, in_stock, new_arrival_badge, limited_drop_badge
     const exactRequestedPayload: Record<string, any> = {
       name,
       category,
       price,
       original_price,
       fabric_gsm,
+      stock_quantity,
       image_url,
       description,
       in_stock,
@@ -554,38 +801,14 @@ export const uploadProductImageToSupabase = async (
 
     console.log(`[Supabase Storage] Uploading image "${file.name}" to bucket "${BUCKET_NAME}" at path "${filePath}"...`);
 
-    // 4. Upload file to Supabase Storage bucket
-    let { data, error } = await supabase.storage
+    // 4. Upload file to Supabase Storage bucket 'product-images'
+    const { data, error } = await supabase.storage
       .from(BUCKET_NAME)
       .upload(filePath, file, {
         cacheControl: '3600',
         upsert: true,
         contentType: file.type
       });
-
-    // Handle missing bucket auto-creation fallback attempt
-    if (error && (error.message?.toLowerCase().includes('bucket not found') || (error as any).statusCode === '404' || (error as any).status === 404)) {
-      console.warn(`[Supabase Storage] Bucket "${BUCKET_NAME}" not found. Attempting bucket creation...`);
-      try {
-        await supabase.storage.createBucket(BUCKET_NAME, {
-          public: true,
-          allowedMimeTypes: ['image/*'],
-          fileSizeLimit: 5242880
-        });
-
-        const retry = await supabase.storage
-          .from(BUCKET_NAME)
-          .upload(filePath, file, {
-            cacheControl: '3600',
-            upsert: true,
-            contentType: file.type
-          });
-        data = retry.data;
-        error = retry.error;
-      } catch (createErr: any) {
-        console.error('[Supabase Storage] Bucket creation error:', createErr?.message);
-      }
-    }
 
     if (error) {
       console.error('[Supabase Storage Upload Error]', error.message);
@@ -595,7 +818,7 @@ export const uploadProductImageToSupabase = async (
       };
     }
 
-    // 5. Get public URL
+    // 5. Get public URL automatically from 'product-images' bucket
     const { data: publicUrlData } = supabase.storage
       .from(BUCKET_NAME)
       .getPublicUrl(filePath);
@@ -718,68 +941,193 @@ export const seedProductsToSupabase = async () => {
   }
 };
 
-export const fetchProductsFromSupabase = async (): Promise<{ success: boolean; data: any[]; error?: string }> => {
+export const fetchProductsFromSupabase = async (): Promise<{ success: boolean; data: any[]; error?: string; rawCount?: number }> => {
   try {
-    console.log('[Supabase Products] Executing query: supabase.from("products").select("*")...');
-    let { data, error } = await supabase
+    console.log('[Supabase Products] Target URL:', SUPABASE_URL);
+    console.log('[Supabase Products] Querying public.products table directly: supabase.from("products").select("*")...');
+    
+    const dbClient = supabaseAdmin || supabase;
+    
+    // 1. Primary Query: Direct client select with created_at ordering
+    let { data, error, status, statusText } = await dbClient
       .from('products')
       .select('*')
       .order('created_at', { ascending: false });
 
-    // If query succeeded but table is empty (0 products), trigger seed script!
-    if (!error && (!data || data.length === 0)) {
-      console.log('[Supabase Products] Products table is empty. Auto-seeding initial Veyro products into Supabase...');
-      const seedResult = await seedProductsToSupabase();
-      if (seedResult.success && seedResult.data.length > 0) {
-        data = seedResult.data;
-      } else {
-        const retry = await supabase.from('products').select('*');
-        data = retry.data || [];
-        error = retry.error;
+    // 2. Fallback: If ordering failed, try raw select without order
+    if (error) {
+      console.warn('[Supabase Products] Primary query note:', error.message || statusText);
+      const fallbackQuery = await dbClient.from('products').select('*');
+      if (fallbackQuery.data && !fallbackQuery.error) {
+        data = fallbackQuery.data;
+        error = null;
+        status = fallbackQuery.status;
+        statusText = fallbackQuery.statusText;
       }
     }
 
-    if (error) {
-      console.warn('[Supabase Products] Fetch notice:', error.message);
-      return { success: true, data: INITIAL_PRODUCTS, error: error.message };
+    // 3. Fallback: Direct Fetch to REST API endpoint if JS client was cached or encountered 404
+    if (error && (error.code === 'PGRST200' || error.code === 'PGRST205' || status === 404 || error.message?.includes('404'))) {
+      try {
+        console.log('[Supabase Products] Retrying with direct REST fetch endpoint...');
+        const restUrl = `${SUPABASE_URL}/rest/v1/products?select=*`;
+        const headers: Record<string, string> = {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json'
+        };
+        const restResp = await fetch(restUrl, { method: 'GET', headers });
+        if (restResp.ok) {
+          const restJson = await restResp.json();
+          if (Array.isArray(restJson)) {
+            data = restJson;
+            error = null;
+            status = restResp.status;
+            statusText = restResp.statusText;
+          }
+        }
+      } catch (restErr: any) {
+        console.warn('[Supabase Products] Direct REST fetch note:', restErr?.message);
+      }
     }
 
-    console.log(`[Supabase Products] Successfully fetched ${data?.length || 0} products from Supabase products table.`);
-    const mappedProducts = (data || []).map(mapSupabaseProductToProduct);
-    return { success: true, data: mappedProducts.length > 0 ? mappedProducts : INITIAL_PRODUCTS };
+    // Console Logs for diagnostics
+    console.log('[Supabase Products] Fetch success. Number of products received:', data ? data.length : 0);
+    if (error) {
+      console.warn('[Supabase Products] Supabase notice/error:', error);
+    }
+
+    if (error) {
+      const isRls = error.code === '42501' || error.message?.toLowerCase().includes('row-level security') || error.message?.toLowerCase().includes('permission denied');
+      const errorMsg = isRls 
+        ? `Row Level Security (RLS) blocked SELECT on "products". Run SQL: CREATE POLICY "Public read products" ON public.products FOR SELECT USING (true); (${error.message})`
+        : (error.message || `Supabase query error (${error.code || status || 'unknown'}): ${statusText || 'Failed to fetch products'}`);
+      
+      console.error('[Supabase Products] Error fetching from Supabase:', errorMsg);
+      return { success: false, data: [], error: errorMsg, rawCount: 0 };
+    }
+
+    // Gracefully handle empty table
+    if (!data || !Array.isArray(data) || data.length === 0) {
+      console.log('[Supabase Products] 0 products found in public.products table (table is empty).');
+      return { success: true, data: [], rawCount: 0 };
+    }
+
+    const mappedProducts = data.map(mapSupabaseProductToProduct);
+    return { success: true, data: mappedProducts, rawCount: data.length };
   } catch (err: any) {
-    console.error('[Supabase Products] Exception:', err);
-    return { success: true, data: INITIAL_PRODUCTS, error: err?.message };
+    console.error('[Supabase Products] Exception during fetchProductsFromSupabase:', err);
+    return { success: false, data: [], error: err?.message || 'Network exception connecting to Supabase', rawCount: 0 };
   }
 };
 
 export const mapSupabaseProductToProduct = (p: any): any => {
-  const images = Array.isArray(p.images) && p.images.length > 0
-    ? p.images
-    : (p.image_url ? [p.image_url] : ['https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80']);
+  if (!p) {
+    return {
+      id: 'unknown',
+      name: 'VEYRO Garment',
+      slug: 'veyro-garment',
+      price: 0,
+      category: 'Oversized T-Shirts',
+      description: '',
+      fabricDetails: '280 GSM Heavyweight Combed Cotton',
+      gsm: 280,
+      fit: 'Oversized Boxy Fit',
+      image_url: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80',
+      images: ['https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80'],
+      colors: [{ name: 'Obsidian Black', hex: '#121212' }],
+      sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
+      inStock: true,
+      stockQuantity: 25,
+      rating: 4.9,
+      reviewCount: 18,
+      tags: ['Heavyweight', 'Streetwear'],
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  // Safe number parser
+  const parseNum = (val: any, fallback = 0): number => {
+    if (val === null || val === undefined || val === '') return fallback;
+    const parsed = typeof val === 'number' ? val : parseFloat(String(val).replace(/[^0-9.-]+/g, ''));
+    return isNaN(parsed) ? fallback : parsed;
+  };
+
+  // 1. Schema fields: id, name, description, price, category, created_at
+  const id = String(p.id ?? '');
+  const name = String(p.name || 'VEYRO Garment');
+  const description = String(p.description || '');
+  const price = parseNum(p.price, 0);
+  const category = (p.category || 'Oversized T-Shirts');
+  const createdAt = String(p.created_at || p.createdAt || new Date().toISOString());
+
+  // 2. Schema field: original_price
+  const originalPrice = (p.original_price !== undefined && p.original_price !== null)
+    ? parseNum(p.original_price)
+    : (p.originalPrice !== undefined && p.originalPrice !== null ? parseNum(p.originalPrice) : undefined);
+
+  // 3. Schema field: fabric_gsm (with fallback to gsm)
+  const gsm = parseNum(p.fabric_gsm ?? p.gsm, 280);
+  const fabricDetails = p.fabric_details || `${gsm} GSM Heavyweight Combed Cotton (Preshrunk)`;
+  const fit = p.fit || 'Oversized Boxy Fit';
+
+  // 4. Schema field: image_url
+  const imageUrl = p.image_url 
+    || (Array.isArray(p.images) && p.images.length > 0 ? p.images[0] : null)
+    || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80';
+  const images = (Array.isArray(p.images) && p.images.length > 0) ? p.images : [imageUrl];
+
+  // 5. Schema fields: stock, stock_quantity, in_stock
+  const stockQuantity = parseNum(p.stock_quantity ?? p.stock ?? p.stockQuantity, 25);
+  const inStock = (p.in_stock !== undefined && p.in_stock !== null)
+    ? Boolean(p.in_stock)
+    : (p.inStock !== undefined ? Boolean(p.inStock) : stockQuantity > 0);
+
+  // 6. Schema fields: new_arrival_badge, limited_drop_badge
+  const isNewArrival = Boolean(p.new_arrival_badge ?? p.is_new_arrival ?? p.isNewArrival ?? false);
+  const isLimitedDrop = Boolean(p.limited_drop_badge ?? p.is_limited_drop ?? p.isLimitedDrop ?? false);
+  const isTrending = Boolean(p.is_trending ?? p.isTrending ?? false);
+
+  // 7. Auxiliary presentation fields
+  const slug = p.slug || (name ? name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : id || 'veyro-piece');
+  const colors = (Array.isArray(p.colors) && p.colors.length > 0)
+    ? p.colors
+    : [{ name: 'Obsidian Black', hex: '#121212' }];
+  const sizes = (Array.isArray(p.sizes) && p.sizes.length > 0)
+    ? p.sizes
+    : ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+  const tags = (Array.isArray(p.tags) && p.tags.length > 0)
+    ? p.tags
+    : [category, `${gsm} GSM`, isLimitedDrop ? 'Limited Drop' : 'Streetwear'];
+  const rating = parseNum(p.rating, 4.9);
+  const reviewCount = parseNum(p.review_count ?? p.reviewCount, 24);
+  const dropNumber = p.drop_number || (isLimitedDrop ? 'LIMITED' : undefined);
 
   return {
-    id: p.id || 'veyro-unknown',
-    name: p.name || 'VEYRO Piece',
-    slug: p.slug || p.id || 'veyro-piece',
-    price: typeof p.price === 'number' ? p.price : Number(p.price) || 0,
-    originalPrice: p.original_price ? Number(p.original_price) : undefined,
-    category: p.category || 'Oversized T-Shirts',
-    description: p.description || '',
-    fabricDetails: p.fabric_details || '100% Combed Heavyweight Cotton • 280 GSM',
-    gsm: p.gsm || 280,
-    fit: p.fit || 'Oversized Boxy Fit',
+    id,
+    name,
+    slug,
+    price,
+    originalPrice,
+    category,
+    description,
+    fabricDetails,
+    gsm,
+    fit,
+    image_url: imageUrl,
     images,
-    colors: Array.isArray(p.colors) && p.colors.length > 0 ? p.colors : [{ name: 'Obsidian Black', hex: '#121212' }],
-    sizes: Array.isArray(p.sizes) && p.sizes.length > 0 ? p.sizes : ['S', 'M', 'L', 'XL'],
-    inStock: p.in_stock !== false,
-    isNewArrival: p.is_new_arrival || false,
-    isTrending: p.is_trending || false,
-    isLimitedDrop: p.is_limited_drop || false,
-    rating: p.rating || 4.9,
-    reviewCount: p.review_count || 24,
-    tags: p.tags || ['Heavyweight', 'Streetwear'],
-    createdAt: p.created_at || new Date().toISOString()
+    colors,
+    sizes,
+    inStock,
+    stockQuantity,
+    isNewArrival,
+    isTrending,
+    isLimitedDrop,
+    dropNumber,
+    rating,
+    reviewCount,
+    tags,
+    createdAt
   };
 };
 
@@ -859,117 +1207,129 @@ export const removeWishlistItemFromSupabase = async (userIdOrEmail: string, prod
 };
 
 // SQL RLS Generator string for Supabase Dashboard setup
-export const GENERATE_SUPABASE_RLS_SQL = `-- VEYRO Streetwear - Production Supabase RLS Policies & Schema
--- Project ID: jjkmtvtdobhiehfzeljr
+export const GENERATE_SUPABASE_RLS_SQL = `-- VEYRO Streetwear - Complete E-Commerce Database Schema & RLS Policies
+-- Execute in Supabase SQL Editor: https://supabase.com/dashboard/project/jjkmtvtdobhiehfzeljr/sql
 
--- 1. Create Profiles Table with Role Column
+-- 1. PROFILES TABLE
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT UNIQUE NOT NULL,
+  full_name TEXT,
   name TEXT,
-  role TEXT DEFAULT 'customer' CHECK (role IN ('customer', 'admin')),
+  avatar_url TEXT,
+  role TEXT DEFAULT 'customer' CHECK (role IN ('customer', 'user', 'admin')),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. Create Admin Roles Table
-CREATE TABLE IF NOT EXISTS public.admin_roles (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
-  role TEXT NOT NULL DEFAULT 'admin',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- Ensure all columns exist on profiles
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'customer';
 
--- 3. Create Products Table
+-- 2. PRODUCTS TABLE
 CREATE TABLE IF NOT EXISTS public.products (
-  id TEXT PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
-  slug TEXT UNIQUE NOT NULL,
+  slug TEXT UNIQUE,
   price NUMERIC NOT NULL,
   original_price NUMERIC,
-  category TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Oversized T-Shirts',
   description TEXT,
+  fabric_gsm INT DEFAULT 280,
   gsm INT DEFAULT 280,
   fit TEXT DEFAULT 'Oversized Boxy Fit',
+  image_url TEXT,
   images TEXT[],
   sizes TEXT[],
   colors JSONB,
   in_stock BOOLEAN DEFAULT true,
+  stock_quantity INT DEFAULT 25,
+  new_arrival_badge BOOLEAN DEFAULT false,
+  limited_drop_badge BOOLEAN DEFAULT false,
   is_new_arrival BOOLEAN DEFAULT false,
   is_limited_drop BOOLEAN DEFAULT false,
   is_trending BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Create Orders & Order Items Tables
+-- Ensure stock_quantity & image_url exist on products
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS stock_quantity INT DEFAULT 25;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS fabric_gsm INT DEFAULT 280;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS new_arrival_badge BOOLEAN DEFAULT false;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS limited_drop_badge BOOLEAN DEFAULT false;
+
+-- 3. ORDERS TABLE
 CREATE TABLE IF NOT EXISTS public.orders (
   id TEXT PRIMARY KEY,
   user_id TEXT,
   items JSONB NOT NULL,
   shipping_address JSONB NOT NULL,
   shipping_method TEXT DEFAULT 'standard',
-  subtotal NUMERIC NOT NULL,
+  subtotal NUMERIC NOT NULL DEFAULT 0,
   discount NUMERIC DEFAULT 0,
-  total NUMERIC NOT NULL,
+  shipping_fee NUMERIC DEFAULT 0,
+  tax NUMERIC DEFAULT 0,
+  total NUMERIC NOT NULL DEFAULT 0,
   status TEXT DEFAULT 'Processing',
   payment_method TEXT DEFAULT 'card',
+  payment_status TEXT DEFAULT 'Paid',
+  tracking_number TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Create Wishlist Table
-CREATE TABLE IF NOT EXISTS public.wishlist (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id TEXT NOT NULL,
-  product_id TEXT NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  CONSTRAINT unique_user_product UNIQUE (user_id, product_id)
-);
+-- Ensure tracking_number & payment_status exist on orders
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'Paid';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tracking_number TEXT DEFAULT '';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS shipping_fee NUMERIC DEFAULT 0;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tax NUMERIC DEFAULT 0;
 
--- 6. Enable Row Level Security (RLS)
+-- 4. STORAGE BUCKET FOR PRODUCT IMAGES
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('product-images', 'product-images', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+-- 5. ENABLE ROW LEVEL SECURITY
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.admin_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.wishlist ENABLE ROW LEVEL SECURITY;
 
--- 7. RLS Policies for Wishlist
-CREATE POLICY "Users manage own wishlist" ON public.wishlist
-  FOR ALL USING (true);
+-- 6. RLS POLICIES FOR PROFILES
+DROP POLICY IF EXISTS "Public read profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Users update own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Anyone manage profiles" ON public.profiles;
 
--- 6. RLS Policies for Profiles
-CREATE POLICY "Users can view own profile" ON public.profiles
-  FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "Anyone manage profiles" ON public.profiles
+  FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "Admins full profile access" ON public.profiles
-  FOR ALL USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
-    )
-  );
-
--- 7. RLS Policies for Products
+-- 7. RLS POLICIES FOR PRODUCTS
 DROP POLICY IF EXISTS "Public read products" ON public.products;
-DROP POLICY IF EXISTS "Admin write products" ON public.products;
-DROP POLICY IF EXISTS "Allow product manage" ON public.products;
+DROP POLICY IF EXISTS "Anyone manage products" ON public.products;
 
 CREATE POLICY "Public read products" ON public.products
   FOR SELECT USING (true);
 
-CREATE POLICY "Allow product manage" ON public.products
+CREATE POLICY "Anyone manage products" ON public.products
   FOR ALL USING (true) WITH CHECK (true);
 
--- 8. RLS Policies for Orders
-DROP POLICY IF EXISTS "Customers view own orders" ON public.orders;
-DROP POLICY IF EXISTS "Admin manage all orders" ON public.orders;
-DROP POLICY IF EXISTS "Anyone can insert orders" ON public.orders;
+-- 8. RLS POLICIES FOR ORDERS
 DROP POLICY IF EXISTS "Public read orders" ON public.orders;
-
-CREATE POLICY "Anyone can insert orders" ON public.orders
-  FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Anyone manage orders" ON public.orders;
 
 CREATE POLICY "Public read orders" ON public.orders
   FOR SELECT USING (true);
 
-CREATE POLICY "Admin manage all orders" ON public.orders
-  FOR ALL USING (true);
+CREATE POLICY "Anyone manage orders" ON public.orders
+  FOR ALL USING (true) WITH CHECK (true);
+
+-- 9. STORAGE POLICIES FOR PRODUCT-IMAGES BUCKET
+DROP POLICY IF EXISTS "Public Read Product Storage" ON storage.objects;
+DROP POLICY IF EXISTS "Anyone Upload Product Storage" ON storage.objects;
+
+CREATE POLICY "Public Read Product Storage" ON storage.objects
+  FOR SELECT USING (bucket_id = 'product-images');
+
+CREATE POLICY "Anyone Upload Product Storage" ON storage.objects
+  FOR ALL USING (bucket_id = 'product-images') WITH CHECK (bucket_id = 'product-images');
 `;
 
