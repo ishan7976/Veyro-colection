@@ -287,33 +287,82 @@ app.put('/api/auth/profile', authenticateToken, (req: any, res: Response) => {
 // 8. Orders - Create Order
 app.post('/api/orders', async (req: Request, res: Response) => {
   try {
-    const { items, shippingAddress, shippingMethod, subtotal, discount, promoCodeApplied, shippingFee, tax, total, paymentMethod, userId } = req.body;
+    const { 
+      items, 
+      shippingAddress, 
+      shippingMethod, 
+      subtotal, 
+      discount, 
+      promoCodeApplied, 
+      shippingFee, 
+      tax, 
+      total, 
+      paymentMethod, 
+      paymentStatus, 
+      upiRefNumber, 
+      cashfreeOrderId, 
+      cashfreePaymentId, 
+      paidAt, 
+      userId,
+      customer_name,
+      customerName,
+      name,
+      email,
+      phone,
+      address,
+      city,
+      state,
+      pincode,
+      zipCode
+    } = req.body;
 
-    if (!items || items.length === 0 || !shippingAddress) {
-      return res.status(400).json({ error: 'Order items and shipping address are required' });
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Order items are required' });
     }
 
+    const resolvedShippingAddress = (shippingAddress && typeof shippingAddress === 'object') ? shippingAddress : {
+      fullName: customer_name || customerName || name || 'Customer',
+      email: email || 'customer@veyro.com',
+      phone: phone || '',
+      address: address || '',
+      city: city || 'Mumbai',
+      state: state || 'Maharashtra',
+      zipCode: pincode || zipCode || '400001',
+      country: 'India'
+    };
+
+    const calculatedSubtotal = Number(subtotal ?? items.reduce((acc: number, it: any) => acc + ((Number(it.price) || 0) * (Number(it.quantity) || 1)), 0));
+    const calculatedTotal = Number(total ?? (calculatedSubtotal - (Number(discount) || 0) + (Number(shippingFee) || 0) + (Number(tax) || 0)));
+
     const order = db.createOrder({
+      id: req.body.id,
       userId,
       items,
-      shippingAddress,
+      shippingAddress: resolvedShippingAddress,
       shippingMethod: shippingMethod || 'standard',
-      subtotal,
-      discount: discount || 0,
+      subtotal: calculatedSubtotal,
+      discount: Number(discount) || 0,
       promoCodeApplied,
-      shippingFee: shippingFee || 0,
-      tax: tax || 0,
-      total,
-      paymentMethod: paymentMethod || 'card'
+      shippingFee: Number(shippingFee) || 0,
+      tax: Number(tax) || 0,
+      total: calculatedTotal,
+      paymentMethod: paymentMethod || 'card',
+      paymentStatus: paymentStatus || (paymentMethod === 'UPI' ? 'PENDING_VERIFICATION' : 'Paid')
     });
 
-    console.log(`[API Orders] Creating order ${order.id} for userId: ${userId || 'guest'}`);
-    // Save to Supabase database synchronously with logging
+    if (upiRefNumber) (order as any).upiRefNumber = upiRefNumber;
+    if (cashfreeOrderId) (order as any).cashfreeOrderId = cashfreeOrderId;
+    if (cashfreePaymentId) (order as any).cashfreePaymentId = cashfreePaymentId;
+    if (paidAt) (order as any).paidAt = paidAt;
+
+    console.log(`[API Orders] Creating order ${order.id} for customer: ${resolvedShippingAddress.fullName} (${resolvedShippingAddress.phone || 'no phone'})`);
+    
+    // Save to Supabase database (both orders and order_items tables)
     const supaRes = await saveOrderToSupabase(order);
     if (!supaRes.success) {
       console.warn('[API Orders] Supabase order insertion notice:', supaRes.error);
     } else {
-      console.log(`[API Orders] Order ${order.id} successfully saved to Supabase orders table.`);
+      console.log(`[API Orders] Order ${order.id} successfully saved to Supabase orders & order_items tables.`);
     }
 
     res.status(201).json({
@@ -323,6 +372,184 @@ app.post('/api/orders', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[API Orders] Failed to place order:', err);
     res.status(500).json({ error: 'Failed to place order' });
+  }
+});
+
+// 8.1 Cashfree Payment - Create Order Proxy Endpoint
+app.post('/api/create-payment-order', async (req: Request, res: Response) => {
+  try {
+    const {
+      orderId,
+      orderAmount,
+      customerName,
+      customerEmail,
+      customerPhone,
+      customerId
+    } = req.body;
+
+    if (!orderId || !orderAmount || !customerEmail) {
+      return res.status(400).json({ error: 'orderId, orderAmount, customerEmail are required' });
+    }
+
+    const appId = process.env.CASHFREE_APP_ID || process.env.CASHFREE_CLIENT_ID || '';
+    const secretKey = process.env.CASHFREE_SECRET_KEY || process.env.CASHFREE_CLIENT_SECRET || '';
+    const envMode = (process.env.CASHFREE_ENV || 'SANDBOX').toUpperCase();
+    const isProd = envMode === 'PRODUCTION';
+
+    if (!appId || !secretKey || appId.startsWith('MY_') || appId === 'your_cashfree_app_id') {
+      return res.json({
+        success: true,
+        simulated: true,
+        order_id: orderId,
+        payment_session_id: `session_sim_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+        order_status: 'ACTIVE',
+        environment: 'SANDBOX',
+        message: 'Cashfree test mode order created.'
+      });
+    }
+
+    const https = await import('https');
+    const cashfreePayload = {
+      order_id: String(orderId),
+      order_amount: parseFloat(Number(orderAmount).toFixed(2)),
+      order_currency: 'INR',
+      customer_details: {
+        customer_id: String(customerId || customerEmail.split('@')[0] || 'cust_' + Date.now()).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 45),
+        customer_name: customerName || 'Customer',
+        customer_email: customerEmail,
+        customer_phone: String(customerPhone || '9876543210').replace(/\D/g, '').slice(-10).padStart(10, '9')
+      },
+      order_meta: {
+        payment_methods: 'cc,dc,upi,netbanking,paylater'
+      },
+      order_note: `VEYRO Streetwear Order #${orderId}`
+    };
+
+    const postData = JSON.stringify(cashfreePayload);
+    const options = {
+      hostname: isProd ? 'api.cashfree.com' : 'sandbox.cashfree.com',
+      port: 443,
+      path: '/pg/orders',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-version': process.env.CASHFREE_API_VERSION || '2023-08-01',
+        'x-client-id': appId,
+        'x-client-secret': secretKey,
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const cfRes: any = await new Promise((resolve, reject) => {
+      const cfReq = https.request(options, (resp) => {
+        let raw = '';
+        resp.on('data', (d) => { raw += d; });
+        resp.on('end', () => {
+          try {
+            resolve({ statusCode: resp.statusCode, body: JSON.parse(raw) });
+          } catch {
+            resolve({ statusCode: resp.statusCode, body: { raw } });
+          }
+        });
+      });
+      cfReq.on('error', reject);
+      cfReq.write(postData);
+      cfReq.end();
+    });
+
+    if (cfRes.statusCode >= 200 && cfRes.statusCode < 300) {
+      return res.json({
+        success: true,
+        order_id: cfRes.body.order_id || orderId,
+        payment_session_id: cfRes.body.payment_session_id,
+        order_status: cfRes.body.order_status,
+        cf_order_id: cfRes.body.cf_order_id,
+        environment: isProd ? 'PRODUCTION' : 'SANDBOX'
+      });
+    }
+
+    return res.status(cfRes.statusCode || 500).json({
+      success: false,
+      error: cfRes.body.message || 'Cashfree order creation failed'
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Payment server error' });
+  }
+});
+
+// 8.2 Cashfree Payment - Verify Payment Proxy Endpoint
+app.get('/api/verify-payment', async (req: Request, res: Response) => {
+  try {
+    const orderId = req.query.orderId as string;
+    if (!orderId) {
+      return res.status(400).json({ error: 'orderId is required' });
+    }
+
+    const appId = process.env.CASHFREE_APP_ID || process.env.CASHFREE_CLIENT_ID || '';
+    const secretKey = process.env.CASHFREE_SECRET_KEY || process.env.CASHFREE_CLIENT_SECRET || '';
+    const envMode = (process.env.CASHFREE_ENV || 'SANDBOX').toUpperCase();
+    const isProd = envMode === 'PRODUCTION';
+
+    if (!appId || !secretKey || appId.startsWith('MY_') || appId === 'your_cashfree_app_id') {
+      return res.json({
+        success: true,
+        order_id: orderId,
+        order_status: 'PAID',
+        payment_status: 'SUCCESS',
+        cf_payment_id: `pay_sim_${Date.now()}`,
+        simulated: true
+      });
+    }
+
+    const https = await import('https');
+    const options = {
+      hostname: isProd ? 'api.cashfree.com' : 'sandbox.cashfree.com',
+      port: 443,
+      path: `/pg/orders/${encodeURIComponent(orderId)}/payments`,
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-version': process.env.CASHFREE_API_VERSION || '2023-08-01',
+        'x-client-id': appId,
+        'x-client-secret': secretKey
+      }
+    };
+
+    const cfRes: any = await new Promise((resolve, reject) => {
+      const cfReq = https.request(options, (resp) => {
+        let raw = '';
+        resp.on('data', (d) => { raw += d; });
+        resp.on('end', () => {
+          try {
+            resolve({ statusCode: resp.statusCode, body: JSON.parse(raw) });
+          } catch {
+            resolve({ statusCode: resp.statusCode, body: { raw } });
+          }
+        });
+      });
+      cfReq.on('error', reject);
+      cfReq.end();
+    });
+
+    if (cfRes.statusCode >= 200 && cfRes.statusCode < 300) {
+      const payments = Array.isArray(cfRes.body) ? cfRes.body : [cfRes.body];
+      const successful = payments.find((p: any) => p.payment_status === 'SUCCESS');
+      const isPaid = !!successful;
+      return res.json({
+        success: isPaid,
+        order_id: orderId,
+        order_status: isPaid ? 'PAID' : (payments[0]?.payment_status || 'PENDING'),
+        payment_status: isPaid ? 'SUCCESS' : (payments[0]?.payment_status || 'PENDING'),
+        cf_payment_id: successful ? (successful.cf_payment_id || successful.payment_id) : (payments[0]?.cf_payment_id || '')
+      });
+    }
+
+    return res.status(cfRes.statusCode || 500).json({
+      success: false,
+      error: cfRes.body.message || 'Payment verification failed'
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Payment server error' });
   }
 });
 

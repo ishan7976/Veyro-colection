@@ -247,9 +247,9 @@ class DatabaseEngine {
   }
 
   // --- Orders ---
-  public createOrder(orderData: Omit<Order, 'id' | 'createdAt' | 'trackingNumber' | 'status' | 'estimatedDelivery'>): Order {
-    const orderId = 'VYR-' + Math.floor(100000 + Math.random() * 900000);
-    const tracking = 'VY-' + Math.floor(100000000 + Math.random() * 900000000) + '-US';
+  public createOrder(orderData: Partial<Order> & Omit<Order, 'id' | 'createdAt' | 'trackingNumber' | 'status' | 'estimatedDelivery'>): Order {
+    const orderId = orderData.id || ('VYR-' + Math.floor(100000 + Math.random() * 900000));
+    const tracking = orderData.trackingNumber || ('VY-' + Math.floor(100000000 + Math.random() * 900000000) + '-US');
     
     const deliveryDate = new Date();
     deliveryDate.setDate(deliveryDate.getDate() + (orderData.shippingMethod === 'express' ? 3 : 6));
@@ -257,10 +257,10 @@ class DatabaseEngine {
     const newOrder: Order = {
       ...orderData,
       id: orderId,
-      status: 'Processing',
+      status: (orderData.status as any) || 'Processing',
       trackingNumber: tracking,
-      createdAt: new Date().toISOString(),
-      estimatedDelivery: deliveryDate.toISOString().split('T')[0]
+      createdAt: orderData.createdAt || new Date().toISOString(),
+      estimatedDelivery: orderData.estimatedDelivery || deliveryDate.toISOString().split('T')[0]
     };
 
     this.data.orders.unshift(newOrder);

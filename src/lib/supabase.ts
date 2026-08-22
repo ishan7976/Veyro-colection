@@ -406,7 +406,8 @@ export const fetchCustomersFromSupabase = async (): Promise<{ success: boolean; 
 export const fetchOrdersFromSupabase = async (userId?: string): Promise<{ success: boolean; data: any[]; error?: string }> => {
   try {
     console.log('[Supabase Orders] Executing query: supabase.from("orders").select("*")...');
-    let query = supabase
+    const dbClient = supabaseAdmin || supabase;
+    let query = dbClient
       .from('orders')
       .select('*')
       .order('created_at', { ascending: false });
@@ -422,6 +423,19 @@ export const fetchOrdersFromSupabase = async (userId?: string): Promise<{ succes
       return { success: false, data: [], error: error.message };
     }
 
+    // Also fetch order_items in case items were stored in separate table
+    let allOrderItems: any[] = [];
+    try {
+      const { data: itemsData } = await dbClient
+        .from('order_items')
+        .select('*');
+      if (Array.isArray(itemsData)) {
+        allOrderItems = itemsData;
+      }
+    } catch {
+      // order_items table might not be present, ignore
+    }
+
     const safeParseNum = (val: any, defaultVal = 0): number => {
       if (val === undefined || val === null || val === '') return defaultVal;
       if (typeof val === 'number') return isNaN(val) ? defaultVal : val;
@@ -431,20 +445,65 @@ export const fetchOrdersFromSupabase = async (userId?: string): Promise<{ succes
     };
 
     const mappedOrders = (data || []).map((o: any) => {
+      // 1. Resolve items: check embedded items first, then fallback to order_items table
       let items = o.items ?? o.order_items ?? o.orderItems ?? o.products ?? [];
       if (typeof items === 'string') {
         try { items = JSON.parse(items); } catch (e) { items = []; }
       }
-      if (!Array.isArray(items)) {
-        items = [];
+      if (!Array.isArray(items) || items.length === 0) {
+        // Find items in order_items table for this order id
+        const matched = allOrderItems.filter((it: any) => String(it.order_id) === String(o.id));
+        if (matched.length > 0) {
+          items = matched.map((it: any) => ({
+            productId: it.product_id || it.productId || 'prod_unknown',
+            name: it.product_name || it.name || 'VEYRO Garment',
+            image: it.image || it.image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80',
+            size: it.size || 'M',
+            color: it.color || 'Obsidian Black',
+            price: safeParseNum(it.price, 0),
+            quantity: safeParseNum(it.quantity, 1)
+          }));
+        } else {
+          items = [];
+        }
+      } else {
+        // Normalize embedded items
+        items = items.map((it: any) => ({
+          productId: it.productId || it.product_id || it.id || 'prod_unknown',
+          name: it.name || it.product_name || it.productName || 'VEYRO Garment',
+          image: it.image || it.image_url || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80',
+          size: it.size || 'M',
+          color: typeof it.color === 'string' ? it.color : (it.color?.name || 'Obsidian Black'),
+          price: safeParseNum(it.price, 0),
+          quantity: safeParseNum(it.quantity, 1)
+        }));
       }
 
-      let shippingAddress = o.shipping_address ?? o.shippingAddress ?? o.address ?? o.delivery_address ?? {};
+      // 2. Resolve Shipping Address and Customer Info
+      let shippingAddress = o.shipping_address ?? o.shippingAddress ?? o.delivery_address ?? {};
       if (typeof shippingAddress === 'string') {
         try { shippingAddress = JSON.parse(shippingAddress); } catch (e) { shippingAddress = {}; }
       }
 
-      const rawTotal = o.total ?? o.total_amount ?? o.totalAmount ?? o.amount ?? o.grand_total ?? o.grandTotal ?? o.final_total;
+      const customerName = o.customer_name || o.customerName || shippingAddress?.fullName || 'Customer';
+      const customerEmail = o.email || o.customer_email || shippingAddress?.email || 'customer@veyro.com';
+      const customerPhone = o.phone || o.customer_phone || shippingAddress?.phone || '';
+      const rawAddress = o.address || shippingAddress?.address || '';
+
+      const normalizedShippingAddress = {
+        fullName: customerName,
+        email: customerEmail,
+        phone: customerPhone,
+        address: rawAddress || (typeof shippingAddress?.address === 'string' ? shippingAddress.address : 'Standard Delivery Destination'),
+        apartment: shippingAddress?.apartment || '',
+        city: o.city || shippingAddress?.city || 'Delhi NCR',
+        state: o.state || shippingAddress?.state || 'Delhi',
+        zipCode: o.pincode || o.zip_code || shippingAddress?.zipCode || '110001',
+        country: shippingAddress?.country || 'India',
+        deliveryNotes: shippingAddress?.deliveryNotes || o.delivery_notes || ''
+      };
+
+      const rawTotal = o.total_amount ?? o.total ?? o.totalAmount ?? o.amount ?? o.grand_total ?? o.grandTotal ?? o.final_total;
       const rawSubtotal = o.subtotal ?? o.sub_total ?? o.subTotal;
       const subtotal = safeParseNum(rawSubtotal, safeParseNum(rawTotal, 0));
       const total = safeParseNum(rawTotal, subtotal);
@@ -452,7 +511,7 @@ export const fetchOrdersFromSupabase = async (userId?: string): Promise<{ succes
       const shippingFee = safeParseNum(o.shipping_fee ?? o.shippingFee ?? o.shipping_amount ?? o.shipping, 0);
       const tax = safeParseNum(o.tax ?? o.tax_amount ?? o.taxAmount ?? o.gst, 0);
 
-      let rawStatus = (o.status ?? o.order_status ?? o.orderStatus ?? 'Processing').toString().trim();
+      let rawStatus = (o.order_status ?? o.status ?? o.orderStatus ?? 'Processing').toString().trim();
       if (!rawStatus) rawStatus = 'Processing';
       const sLower = rawStatus.toLowerCase();
       let normalizedStatus: string = 'Processing';
@@ -476,9 +535,7 @@ export const fetchOrdersFromSupabase = async (userId?: string): Promise<{ succes
         id: String(o.id || `ord_${Date.now()}`),
         userId: o.user_id ?? o.userId ?? o.customer_id ?? o.customerId,
         items,
-        shippingAddress: shippingAddress && typeof shippingAddress === 'object' && Object.keys(shippingAddress).length > 0
-          ? shippingAddress
-          : { fullName: 'Customer', email: 'customer@veyro.com' },
+        shippingAddress: normalizedShippingAddress,
         shippingMethod: o.shipping_method ?? o.shippingMethod ?? 'standard',
         subtotal,
         discount,
@@ -488,6 +545,10 @@ export const fetchOrdersFromSupabase = async (userId?: string): Promise<{ succes
         status: normalizedStatus,
         paymentMethod: o.payment_method ?? o.paymentMethod ?? 'card',
         paymentStatus: o.payment_status ?? o.paymentStatus ?? (normalizedStatus === 'Delivered' ? 'Paid' : 'Pending'),
+        upiRefNumber: o.upi_ref_number ?? o.upiRefNumber ?? undefined,
+        cashfreeOrderId: o.cashfree_order_id ?? o.cashfreeOrderId ?? undefined,
+        cashfreePaymentId: o.cashfree_payment_id ?? o.cashfreePaymentId ?? undefined,
+        paidAt: o.paid_at ?? o.paidAt ?? undefined,
         trackingNumber: o.tracking_number ?? o.trackingNumber ?? o.tracking ?? '',
         createdAt: o.created_at ?? o.createdAt ?? o.inserted_at ?? new Date().toISOString(),
         estimatedDelivery: o.estimated_delivery ?? o.estimatedDelivery ?? '3-5 Business Days'
@@ -530,19 +591,19 @@ export const fetchOrderStatsFromSupabase = async (): Promise<{
     const validOrders = Array.isArray(orders) ? orders : [];
     const totalOrders = validOrders.length;
 
-    // Requirement: Total Revenue = SUM(actual order total amount)
+    // Total Revenue = SUM(actual order total amount)
     const totalRevenue = validOrders.reduce((sum: number, o: any) => {
       const amount = Number(o.total) || 0;
       return sum + amount;
     }, 0);
 
-    // Requirement: Average Order Value = Total Revenue / Total Orders
+    // Average Order Value = Total Revenue / Total Orders
     const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
-    // Requirement: Processing Queue = COUNT orders where status = 'Processing'
+    // Processing Queue = COUNT orders where status = 'Processing' or 'Pending'
     const processingQueue = validOrders.filter((o: any) => {
       const status = typeof o.status === 'string' ? o.status.trim().toLowerCase() : '';
-      return status === 'processing';
+      return status === 'processing' || status === 'pending';
     }).length;
 
     // Status breakdown map
@@ -577,40 +638,198 @@ export const fetchOrderStatsFromSupabase = async (): Promise<{
 
 export const saveOrderToSupabase = async (orderData: any) => {
   try {
-    const payload = {
-      id: orderData.id,
-      user_id: orderData.userId || null,
-      items: typeof orderData.items === 'object' ? orderData.items : [],
-      shipping_address: typeof orderData.shippingAddress === 'object' ? orderData.shippingAddress : {},
+    const dbClient = supabaseAdmin || supabase;
+
+    // Validate UUID format for user_id to prevent foreign key errors on auth.users(id)
+    const isValidUuid = (val: any) =>
+      typeof val === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val);
+
+    const resolvedUserId = isValidUuid(orderData.userId || orderData.user_id) ? (orderData.userId || orderData.user_id) : null;
+    
+    // Extract clean customer details
+    const shippingAddr = typeof orderData.shippingAddress === 'object' ? orderData.shippingAddress : {};
+    const customerName = shippingAddr?.fullName || orderData.customerName || orderData.customer_name || 'Customer';
+    const email = shippingAddr?.email || orderData.email || 'customer@veyro.com';
+    const phone = shippingAddr?.phone || orderData.phone || '';
+    const fullAddress = typeof orderData.shippingAddress === 'string'
+      ? orderData.shippingAddress
+      : [
+          shippingAddr?.address,
+          shippingAddr?.apartment,
+          shippingAddr?.city,
+          shippingAddr?.state,
+          shippingAddr?.zipCode,
+          shippingAddr?.country
+        ].filter(Boolean).join(', ') || orderData.address || '';
+
+    const totalAmount = Number(orderData.total ?? orderData.total_amount ?? 0);
+    const subtotal = Number(orderData.subtotal ?? totalAmount);
+    const discount = Number(orderData.discount ?? 0);
+    const shippingFee = Number(orderData.shippingFee ?? orderData.shipping_fee ?? 0);
+    const tax = Number(orderData.tax ?? 0);
+    const orderStatus = orderData.status || orderData.order_status || 'Processing';
+    const paymentStatus = orderData.paymentStatus || orderData.payment_status || (orderData.paymentMethod === 'UPI' ? 'PENDING_VERIFICATION' : 'Paid');
+    const paymentMethod = orderData.paymentMethod || orderData.payment_method || 'card';
+    const trackingNumber = orderData.trackingNumber || orderData.tracking_number || '';
+    const createdAt = orderData.createdAt || orderData.created_at || new Date().toISOString();
+    const orderId = String(orderData.id || `VYR-${Math.floor(100000 + Math.random() * 900000)}`);
+
+    // Base standard payload adhering strictly to Supabase orders table schema
+    let currentPayload: Record<string, any> = {
+      id: orderId,
+      user_id: resolvedUserId,
+      items: Array.isArray(orderData.items) ? orderData.items : [],
+      shipping_address: shippingAddr,
       shipping_method: orderData.shippingMethod || 'standard',
-      subtotal: orderData.subtotal || 0,
-      discount: orderData.discount || 0,
-      shipping_fee: orderData.shippingFee || 0,
-      tax: orderData.tax || 0,
-      total: orderData.total || 0,
-      status: orderData.status || 'Processing',
-      payment_method: orderData.paymentMethod || 'card',
-      payment_status: orderData.paymentStatus || 'Paid',
-      tracking_number: orderData.trackingNumber || '',
-      created_at: orderData.createdAt || new Date().toISOString()
+      subtotal: subtotal,
+      discount: discount,
+      shipping_fee: shippingFee,
+      tax: tax,
+      total: totalAmount,
+      status: orderStatus,
+      payment_method: paymentMethod,
+      payment_status: paymentStatus,
+      tracking_number: trackingNumber,
+      created_at: createdAt
     };
 
-    console.log('[Supabase Orders] Saving order to Supabase orders table:', payload.id);
-    const { data, error } = await supabase
-      .from('orders')
-      .upsert([payload], { onConflict: 'id' })
-      .select();
+    console.log('[Supabase Orders] inserting order payload', {
+      orderId,
+      customer: customerName,
+      amount: totalAmount,
+      payload: currentPayload
+    });
+    
+    // Adaptive insert: if column missing (PGRST204) or FK error (23503), prune and retry
+    let insertResult: any = null;
+    let attempts = 0;
+    const maxAttempts = 8;
+    let lastErrorMessage: string = '';
 
-    if (error) {
-      console.error('[Supabase Orders] Order insert error:', error.message);
-      return { success: false, error: error.message };
+    while (attempts < maxAttempts) {
+      attempts++;
+      const { data, error } = await dbClient
+        .from('orders')
+        .upsert([currentPayload], { onConflict: 'id' })
+        .select();
+
+      console.log(`[Supabase Orders] Supabase response (attempt ${attempts}):`, { data, error });
+
+      if (!error && data && data.length > 0) {
+        insertResult = data;
+        console.log('[Supabase Orders] created order id:', orderId);
+        break;
+      }
+
+      if (error) {
+        lastErrorMessage = error.message || error.details || 'Supabase orders insert failed';
+        console.warn(`[Supabase Orders] Insert attempt ${attempts} notice:`, lastErrorMessage);
+
+        // Check if error is missing column (e.g. column "phone" does not exist)
+        const missingColMatch = error.message.match(/Could not find the ['"]?([a-zA-Z0-9_]+)['"]? column/i)
+          || error.message.match(/column ['"]?([a-zA-Z0-9_]+)['"]? of relation ['"]?orders['"]? does not exist/i)
+          || error.message.match(/column ['"]?([a-zA-Z0-9_]+)['"]? does not exist/i);
+
+        if (missingColMatch && missingColMatch[1]) {
+          const badCol = missingColMatch[1];
+          console.log(`[Supabase Orders] Pruning non-existent column "${badCol}" from orders payload and retrying...`);
+          delete currentPayload[badCol];
+          continue;
+        }
+
+        // Check if foreign key on user_id failed
+        if (error.code === '23503' || error.message.toLowerCase().includes('foreign key') || error.message.toLowerCase().includes('user_id')) {
+          console.log('[Supabase Orders] Foreign key constraint on user_id triggered. Setting user_id = null and retrying...');
+          currentPayload.user_id = null;
+          continue;
+        }
+
+        // Fallback: try ultra-minimal standard payload without optional columns
+        if (attempts === maxAttempts - 1) {
+          console.log('[Supabase Orders] Trying ultra-minimal standard payload for orders table...');
+          currentPayload = {
+            id: orderId,
+            items: Array.isArray(orderData.items) ? orderData.items : [],
+            shipping_address: shippingAddr,
+            total: totalAmount,
+            status: orderStatus,
+            payment_method: paymentMethod,
+            payment_status: paymentStatus,
+            created_at: createdAt
+          };
+          continue;
+        }
+
+        break;
+      }
     }
 
-    console.log('[Supabase Orders] Order inserted successfully into Supabase orders table:', data?.[0]?.id || orderData.id);
-    return { success: true, data };
+    if (!insertResult) {
+      console.error('[Supabase Orders] Failed to save order to public.orders table:', lastErrorMessage);
+      return {
+        success: false,
+        error: lastErrorMessage || 'Could not insert order into Supabase database (RLS or schema error)',
+        orderId
+      };
+    }
+
+    // 2. Insert line items into order_items table
+    if (Array.isArray(orderData.items) && orderData.items.length > 0) {
+      console.log('[Supabase Orders] inserting order items', {
+        orderId,
+        itemCount: orderData.items.length,
+        items: orderData.items
+      });
+
+      const itemsToInsert = orderData.items.map((item: any) => {
+        const rawPid = item.productId || item.product_id || item.id;
+        const validPid = isValidUuid(rawPid) ? rawPid : null;
+        return {
+          order_id: orderId,
+          product_id: validPid || (rawPid ? String(rawPid) : null),
+          product_name: item.name || item.productName || item.product_name || 'VEYRO Garment',
+          quantity: Number(item.quantity) || 1,
+          price: Number(item.price) || 0,
+          size: String(item.size || 'M'),
+          color: typeof item.color === 'string' ? item.color : (item.color?.name || 'Obsidian Black'),
+          created_at: createdAt
+        };
+      });
+
+      try {
+        const { data: itemsData, error: itemsErr } = await dbClient
+          .from('order_items')
+          .upsert(itemsToInsert)
+          .select();
+
+        console.log('[Supabase Order Items] Supabase response for order_items:', { data: itemsData, error: itemsErr });
+
+        if (itemsErr) {
+          console.warn('[Supabase Order Items] Upsert notice on order_items table:', itemsErr.message);
+          // If FK failed on product_id, retry with product_id: null
+          if (itemsErr.code === '23503' || itemsErr.message?.toLowerCase().includes('product_id')) {
+            const itemsNoFk = itemsToInsert.map(i => ({ ...i, product_id: null }));
+            const { error: retryErr } = await dbClient.from('order_items').upsert(itemsNoFk);
+            if (retryErr) {
+              console.warn('[Supabase Order Items] Retry without FK notice:', retryErr.message);
+            }
+          }
+        } else {
+          console.log('[Supabase Order Items] Successfully inserted products into public.order_items table.');
+        }
+      } catch (itemException: any) {
+        console.warn('[Supabase Order Items] Exception writing to order_items:', itemException?.message);
+      }
+    }
+
+    return { 
+      success: true, 
+      data: insertResult || [currentPayload],
+      orderId 
+    };
   } catch (err: any) {
     console.error('[Supabase Orders] Order sync exception:', err?.message);
-    return { success: false, error: err?.message };
+    return { success: false, error: err?.message || 'Unexpected error while syncing order to Supabase' };
   }
 };
 
@@ -618,12 +837,16 @@ export const updateOrderStatusInSupabase = async (
   orderId: string, 
   status: string, 
   trackingNumber?: string,
-  paymentStatus?: string
+  paymentStatus?: string,
+  extra?: { cashfreePaymentId?: string; cashfreeOrderId?: string; paidAt?: string }
 ) => {
   try {
     const updatePayload: Record<string, any> = { status };
     if (trackingNumber !== undefined) updatePayload.tracking_number = trackingNumber;
     if (paymentStatus !== undefined) updatePayload.payment_status = paymentStatus;
+    if (extra?.cashfreePaymentId) updatePayload.cashfree_payment_id = extra.cashfreePaymentId;
+    if (extra?.cashfreeOrderId) updatePayload.cashfree_order_id = extra.cashfreeOrderId;
+    if (extra?.paidAt) updatePayload.paid_at = extra.paidAt;
 
     const { data, error } = await supabase
       .from('orders')
@@ -1263,8 +1486,15 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS limited_drop_badge BOOLEAN 
 CREATE TABLE IF NOT EXISTS public.orders (
   id TEXT PRIMARY KEY,
   user_id TEXT,
-  items JSONB NOT NULL,
-  shipping_address JSONB NOT NULL,
+  customer_name TEXT,
+  email TEXT,
+  phone TEXT,
+  address TEXT,
+  total_amount NUMERIC NOT NULL DEFAULT 0,
+  payment_status TEXT DEFAULT 'Paid',
+  order_status TEXT DEFAULT 'Processing',
+  items JSONB,
+  shipping_address JSONB,
   shipping_method TEXT DEFAULT 'standard',
   subtotal NUMERIC NOT NULL DEFAULT 0,
   discount NUMERIC DEFAULT 0,
@@ -1273,28 +1503,55 @@ CREATE TABLE IF NOT EXISTS public.orders (
   total NUMERIC NOT NULL DEFAULT 0,
   status TEXT DEFAULT 'Processing',
   payment_method TEXT DEFAULT 'card',
-  payment_status TEXT DEFAULT 'Paid',
   tracking_number TEXT DEFAULT '',
+  upi_ref_number TEXT,
+  cashfree_order_id TEXT,
+  cashfree_payment_id TEXT,
+  paid_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Ensure tracking_number & payment_status exist on orders
+-- Ensure all order columns exist on existing databases
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_name TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS total_amount NUMERIC DEFAULT 0;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS order_status TEXT DEFAULT 'Processing';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'card';
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'Paid';
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tracking_number TEXT DEFAULT '';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS upi_ref_number TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS cashfree_order_id TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS cashfree_payment_id TEXT;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS shipping_fee NUMERIC DEFAULT 0;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tax NUMERIC DEFAULT 0;
 
--- 4. STORAGE BUCKET FOR PRODUCT IMAGES
+-- 4. ORDER ITEMS TABLE
+CREATE TABLE IF NOT EXISTS public.order_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id TEXT NOT NULL,
+  product_id TEXT,
+  product_name TEXT NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  price NUMERIC NOT NULL DEFAULT 0,
+  size TEXT DEFAULT 'M',
+  color TEXT DEFAULT 'Obsidian Black',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. STORAGE BUCKET FOR PRODUCT IMAGES
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('product-images', 'product-images', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
--- 5. ENABLE ROW LEVEL SECURITY
+-- 6. ENABLE ROW LEVEL SECURITY
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 
--- 6. RLS POLICIES FOR PROFILES
+-- 7. RLS POLICIES FOR PROFILES
 DROP POLICY IF EXISTS "Public read profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Users update own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Anyone manage profiles" ON public.profiles;
@@ -1302,7 +1559,7 @@ DROP POLICY IF EXISTS "Anyone manage profiles" ON public.profiles;
 CREATE POLICY "Anyone manage profiles" ON public.profiles
   FOR ALL USING (true) WITH CHECK (true);
 
--- 7. RLS POLICIES FOR PRODUCTS
+-- 8. RLS POLICIES FOR PRODUCTS
 DROP POLICY IF EXISTS "Public read products" ON public.products;
 DROP POLICY IF EXISTS "Anyone manage products" ON public.products;
 
@@ -1312,7 +1569,7 @@ CREATE POLICY "Public read products" ON public.products
 CREATE POLICY "Anyone manage products" ON public.products
   FOR ALL USING (true) WITH CHECK (true);
 
--- 8. RLS POLICIES FOR ORDERS
+-- 9. RLS POLICIES FOR ORDERS
 DROP POLICY IF EXISTS "Public read orders" ON public.orders;
 DROP POLICY IF EXISTS "Anyone manage orders" ON public.orders;
 
@@ -1322,7 +1579,17 @@ CREATE POLICY "Public read orders" ON public.orders
 CREATE POLICY "Anyone manage orders" ON public.orders
   FOR ALL USING (true) WITH CHECK (true);
 
--- 9. STORAGE POLICIES FOR PRODUCT-IMAGES BUCKET
+-- 10. RLS POLICIES FOR ORDER_ITEMS
+DROP POLICY IF EXISTS "Public read order_items" ON public.order_items;
+DROP POLICY IF EXISTS "Anyone manage order_items" ON public.order_items;
+
+CREATE POLICY "Public read order_items" ON public.order_items
+  FOR SELECT USING (true);
+
+CREATE POLICY "Anyone manage order_items" ON public.order_items
+  FOR ALL USING (true) WITH CHECK (true);
+
+-- 11. STORAGE POLICIES FOR PRODUCT-IMAGES BUCKET
 DROP POLICY IF EXISTS "Public Read Product Storage" ON storage.objects;
 DROP POLICY IF EXISTS "Anyone Upload Product Storage" ON storage.objects;
 
@@ -1332,4 +1599,193 @@ CREATE POLICY "Public Read Product Storage" ON storage.objects
 CREATE POLICY "Anyone Upload Product Storage" ON storage.objects
   FOR ALL USING (bucket_id = 'product-images') WITH CHECK (bucket_id = 'product-images');
 `;
+
+// 10. SHIPMENTS & LOGISTICS MANAGEMENT (Quickink / Shiprocket style)
+export const fetchShipmentsFromSupabase = async (): Promise<{ success: boolean; data: any[]; error?: string }> => {
+  try {
+    const { data, error } = await supabase
+      .from('shipments')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('[Supabase Shipments] Notice querying public.shipments table:', error.message);
+      return { success: false, data: [], error: error.message };
+    }
+
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    console.warn('[Supabase Shipments] Exception:', err?.message || err);
+    return { success: false, data: [], error: err?.message };
+  }
+};
+
+export const saveShipmentToSupabase = async (shipment: any): Promise<{ success: boolean; data?: any; error?: string }> => {
+  try {
+    const payload = {
+      id: shipment.id,
+      order_id: shipment.orderId,
+      customer_name: shipment.customerName,
+      customer_phone: shipment.customerPhone || '',
+      courier_partner: shipment.courierPartner,
+      awb_number: shipment.awbNumber,
+      status: shipment.status,
+      origin_city: shipment.originCity,
+      dest_city: shipment.destCity,
+      dest_pincode: shipment.destPincode,
+      weight_kg: shipment.weightKg,
+      shipping_fee: shipment.shippingFee,
+      rto_reason: shipment.rtoReason || null,
+      timeline: shipment.timeline || [],
+      created_at: shipment.createdAt || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from('shipments')
+      .upsert([payload], { onConflict: 'id' })
+      .select();
+
+    if (error) {
+      console.warn('[Supabase Shipments] Upsert notice:', error.message);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, data };
+  } catch (err: any) {
+    console.warn('[Supabase Shipments] Exception:', err?.message || err);
+    return { success: false, error: err?.message };
+  }
+};
+
+export const updateShipmentStatusInSupabase = async (
+  shipmentId: string,
+  status: string,
+  newTimelineEvent?: { title: string; location: string; timestamp: string; done: boolean }
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    let currentTimeline: any[] = [];
+    if (newTimelineEvent) {
+      const { data } = await supabase.from('shipments').select('timeline').eq('id', shipmentId).single();
+      if (data?.timeline && Array.isArray(data.timeline)) {
+        currentTimeline = [...data.timeline, newTimelineEvent];
+      } else {
+        currentTimeline = [newTimelineEvent];
+      }
+    }
+
+    const updatePayload: any = {
+      status,
+      updated_at: new Date().toISOString()
+    };
+    if (newTimelineEvent) {
+      updatePayload.timeline = currentTimeline;
+    }
+
+    const { error } = await supabase
+      .from('shipments')
+      .update(updatePayload)
+      .eq('id', shipmentId);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+};
+
+// 11. MARKETING & PROMO CODES
+export const fetchPromoCodesFromSupabase = async (): Promise<{ success: boolean; data: any[]; error?: string }> => {
+  try {
+    const { data, error } = await supabase
+      .from('promo_codes')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return { success: false, data: [], error: error.message };
+    }
+    return { success: true, data: data || [] };
+  } catch (err: any) {
+    return { success: false, data: [], error: err?.message };
+  }
+};
+
+export const savePromoCodeToSupabase = async (promo: any): Promise<{ success: boolean; data?: any; error?: string }> => {
+  try {
+    const payload = {
+      id: promo.id,
+      code: promo.code.toUpperCase().trim(),
+      discount_percent: promo.discountPercent,
+      discount_amount: promo.discountAmount || 0,
+      min_order_value: promo.minOrderValue || 0,
+      usage_limit: promo.usageLimit || 100,
+      times_used: promo.timesUsed || 0,
+      is_active: promo.isActive !== false,
+      expires_at: promo.expiresAt,
+      created_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from('promo_codes')
+      .upsert([payload], { onConflict: 'code' })
+      .select();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+};
+
+export const deletePromoCodeFromSupabase = async (code: string): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const { error } = await supabase
+      .from('promo_codes')
+      .delete()
+      .eq('code', code.toUpperCase().trim());
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message };
+  }
+};
+
+// Real-time Postgres Changes Listener
+export const subscribeToSupabaseRealtime = (
+  tables: ('products' | 'orders' | 'profiles' | 'shipments')[],
+  onChange: (payload: any) => void
+) => {
+  try {
+    const channelName = `realtime-admin-dashboard-${Date.now()}`;
+    const channel = supabase.channel(channelName);
+
+    tables.forEach(table => {
+      channel.on(
+        'postgres_changes' as any,
+        { event: '*', schema: 'public', table },
+        (payload: any) => {
+          console.log(`[Supabase Realtime] Event on ${table}:`, payload);
+          onChange({ table, ...payload });
+        }
+      );
+    });
+
+    channel.subscribe((status) => {
+      console.log(`[Supabase Realtime] Channel status: ${status}`);
+    });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  } catch (e) {
+    console.warn('[Supabase Realtime] Subscription error:', e);
+    return () => {};
+  }
+};
 

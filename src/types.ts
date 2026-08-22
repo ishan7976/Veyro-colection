@@ -70,6 +70,7 @@ export interface ShippingAddress {
   state: string;
   zipCode: string;
   country: string;
+  deliveryNotes?: string;
 }
 
 export interface User {
@@ -94,9 +95,63 @@ export interface OrderItem {
   quantity: number;
 }
 
+export type OrderStatus = 
+  | 'Pending'
+  | 'Confirmed'
+  | 'New Orders'
+  | 'Processing' 
+  | 'Packed'
+  | 'Shipped' 
+  | 'Out for Delivery' 
+  | 'Delivered' 
+  | 'Cancelled'
+  | 'Returned';
+
+export type CourierPartner = 'Delhivery' | 'BlueDart' | 'Shiprocket' | 'Quickink' | 'XpressBees' | 'Shadowfax' | 'DTDC';
+
+export interface ShipmentTimelineEvent {
+  title: string;
+  location: string;
+  timestamp: string;
+  done: boolean;
+}
+
+export interface Shipment {
+  id: string;
+  orderId: string;
+  customerName: string;
+  customerPhone?: string;
+  courierPartner: CourierPartner;
+  awbNumber: string;
+  status: 'Manifested' | 'Picked Up' | 'In Transit' | 'Out for Delivery' | 'Delivered' | 'RTO Initiated' | 'RTO Delivered' | 'NDR Pending';
+  originCity: string;
+  destCity: string;
+  destPincode: string;
+  weightKg: number;
+  shippingFee: number;
+  rtoReason?: string;
+  timeline: ShipmentTimelineEvent[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PromoCode {
+  id: string;
+  code: string;
+  discountPercent: number;
+  discountAmount?: number;
+  minOrderValue: number;
+  usageLimit: number;
+  timesUsed: number;
+  isActive: boolean;
+  expiresAt: string;
+}
+
 export interface Order {
   id: string;
   userId?: string;
+  phone?: string;
+  deliveryNotes?: string;
   items: OrderItem[];
   shippingAddress: ShippingAddress;
   shippingMethod: 'standard' | 'express' | 'overnight';
@@ -106,10 +161,16 @@ export interface Order {
   shippingFee: number;
   tax: number;
   total: number;
-  status: 'Processing' | 'Shipped' | 'Out for Delivery' | 'Delivered' | 'Cancelled';
-  paymentMethod: 'card' | 'apple_pay' | 'google_pay' | 'cod';
-  paymentStatus?: 'Paid' | 'Pending' | 'Failed' | 'Refunded';
+  status: 'Pending' | 'New Orders' | 'Processing' | 'Confirmed' | 'Packed' | 'Shipped' | 'Out for Delivery' | 'Delivered' | 'Cancelled' | 'Returned';
+  paymentMethod: 'card' | 'apple_pay' | 'google_pay' | 'cod' | 'cashfree' | 'UPI' | 'upi';
+  paymentStatus?: 'Paid' | 'Pending' | 'Failed' | 'Refunded' | 'PENDING_VERIFICATION' | 'PAID' | 'FAILED';
+  cashfreeOrderId?: string;
+  cashfreePaymentId?: string;
+  upiRefNumber?: string;
+  paidAt?: string;
+  courierPartner?: CourierPartner;
   trackingNumber: string;
+  shippingStatus?: 'Manifested' | 'Picked Up' | 'In Transit' | 'Out for Delivery' | 'Delivered' | 'RTO Initiated' | 'RTO Delivered';
   createdAt: string;
   estimatedDelivery: string;
 }

@@ -100,11 +100,11 @@ export const HomeView: React.FC = () => {
             </div>
 
             {/* Background Image subtle background glow */}
-            <div className="absolute inset-0 opacity-20 pointer-events-none">
+            <div className="absolute inset-0 opacity-30 pointer-events-none">
               <img
-                src="https://images.unsplash.com/photo-1509967419530-da38b4704bc6?q=80&w=1600&auto=format&fit=crop"
-                alt="VEYRO Background"
-                className="w-full h-full object-cover object-center"
+                src="https://images.unsplash.com/photo-1552374196-1ab2a1c593e8?q=80&w=1920&auto=format&fit=crop"
+                alt="VEYRO Streetwear Editorial"
+                className="w-full h-full object-cover object-center scale-105 transition-transform duration-1000"
                 referrerPolicy="no-referrer"
               />
             </div>

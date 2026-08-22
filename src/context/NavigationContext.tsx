@@ -1,7 +1,19 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { PageView, FilterState, Order } from '../types';
 
-export type AdminSubRoute = 'overview' | 'dashboard' | 'products' | 'orders' | 'customers' | 'inventory' | 'rls-security';
+export type AdminSubRoute = 
+  | 'overview' 
+  | 'dashboard' 
+  | 'products' 
+  | 'orders' 
+  | 'customers' 
+  | 'inventory' 
+  | 'shipping'
+  | 'payments'
+  | 'analytics'
+  | 'marketing'
+  | 'settings'
+  | 'rls-security';
 
 interface NavigationContextType {
   page: PageView;
